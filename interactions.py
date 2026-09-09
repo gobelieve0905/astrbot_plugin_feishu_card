@@ -9,8 +9,6 @@ from astrbot.api.message_components import Plain, At
 from lark_oapi import EventDispatcherHandler
 from lark_oapi.event.callback.model.p2_card_action_trigger import P2CardActionTriggerResponse
 
-RESUME = 'feishu_card_resume'
-
 
 class Interactions:
     def __init__(self, plugin):
@@ -111,11 +109,10 @@ class Interactions:
             event.session = copy.deepcopy(session.event.session)
             event.is_at_or_wake_command = True
             event.is_wake = True
-            event.set_extra(RESUME, session)
             platform.commit_event(event)
-            # All actions from this view are consumed together, preventing concurrent writers.
+            # All actions from this view are consumed together, preventing duplicate continuation requests.
             self.bindings = {k: v for k, v in self.bindings.items() if v['session'] is not session}
-            return self.toast('已收到，Agent 将继续处理并更新卡片。', 'success')
+            return self.toast('已收到，Agent 将继续当前会话并发送新卡片。', 'success')
         except Exception as exc:
             self.plugin.logger.warning('Card callback rejected (%s)', type(exc).__name__)
             return self.toast('交互处理失败，请发送消息继续。', 'error')

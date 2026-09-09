@@ -9,7 +9,6 @@ from astrbot.api.message_components import Plain, Json
 
 from .card import State, pages, render, safe_text
 from .transport import Transport
-from .interactions import RESUME
 
 
 class Session:
@@ -18,11 +17,6 @@ class Session:
         self.state = State(question=event.message_str)
         self.transport = Transport(event.bot)
         self.cards, self.sequences, self.sent_bodies = [], [], []
-        previous = event.get_extra(RESUME) if hasattr(event, 'get_extra') else None
-        if previous:
-            self.cards = list(previous.cards)
-            self.sequences = list(previous.sequences)
-            self.sent_bodies = [""] * len(self.cards)
         self.closed = False
         self.stream_active = False
         self.done_received = False

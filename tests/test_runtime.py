@@ -1,6 +1,7 @@
 """Run with the installed AstrBot venv. Network-free delivery/lifecycle regressions."""
 import asyncio
 import importlib
+import itertools
 from pathlib import Path
 import sys
 from types import SimpleNamespace
@@ -15,12 +16,13 @@ from astrbot.api.message_components import Json
 
 
 class FakeTransport:
+    ids = itertools.count()
     def __init__(self, bot):
         self.bodies = []
         self.fail = False
 
     async def create(self, body):
-        return 'test-card-' + str(len(self.bodies))
+        return 'test-card-' + str(next(self.ids))
 
     async def update(self, card_id, body, sequence):
         if self.fail:
@@ -225,7 +227,7 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         await session.finish()
         self.assertIn('Complete fallback', event.native[0].get_plain_text())
 
-    async def test_callback_authorization_one_shot_and_same_card_resume(self):
+    async def test_callback_continues_conversation_in_new_card_without_changing_original(self):
         from lark_oapi import EventDispatcherHandler
         from lark_oapi.event.callback.model.p2_card_action_trigger import P2CardActionTrigger
         from copy import deepcopy
@@ -256,11 +258,17 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(queue), 1)
             manager.receive(platform, payload('test-user'))
             self.assertEqual(len(queue), 1)
+            original_bodies = deepcopy(session.transport.bodies)
+            original_sequences = list(session.sequences)
+            self.assertEqual(queue[0].session, event.session)
             resumed = session_module.Session(self.plugin, queue[0])
-            self.assertEqual(resumed.cards, session.cards)
+            self.assertEqual(resumed.cards, [])
             await resumed.start()
-            self.assertEqual(queue[0].sent, [])
+            self.assertEqual(len(queue[0].sent), 1)
+            self.assertTrue(set(resumed.cards).isdisjoint(session.cards))
             await resumed.finish('test completed')
+            self.assertEqual(session.transport.bodies, original_bodies)
+            self.assertEqual(session.sequences, original_sequences)
         finally:
             manager.close()
         self.assertNotIn('p2.card.action.trigger', platform.event_handler._callback_processor_map)
