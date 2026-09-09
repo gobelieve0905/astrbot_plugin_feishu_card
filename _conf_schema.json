@@ -1,16 +1,80 @@
 {
-  "enabled": {"description": "启用飞书 Agent 卡片", "type": "bool", "default": true},
-  "platform_ids": {"description": "生效的飞书实例 ID（空列表代表全部飞书实例）", "type": "list", "default": []},
-  "enable_private": {"description": "私聊生效", "type": "bool", "default": true},
-  "enable_group": {"description": "群聊生效（沿用宿主唤醒与权限规则）", "type": "bool", "default": true},
-  "group_stop_initiator_only": {"description": "群聊仅允许发起人终止回答（关闭后同群成员均可终止；私聊始终仅限发起人）", "type": "bool", "default": true},
-  "image_roots": {"description": "卡片图片上传允许目录（空列表使用 AstrBot data/temp 与 data/plugin_data）", "type": "list", "default": []},
-  "show_process": {"description": "显示折叠处理过程", "type": "bool", "default": true},
-  "expand_process": {"description": "默认展开处理过程", "type": "bool", "default": false},
-  "show_tools": {"description": "显示工具调用摘要", "type": "bool", "default": true},
-  "show_sources": {"description": "显示知识与数据来源", "type": "bool", "default": true},
-  "show_usage": {"description": "显示模型与用量", "type": "bool", "default": true},
-  "update_interval": {"description": "卡片更新间隔（秒，限制在 1–10 秒）", "type": "float", "default": 1.5},
-  "price_currency": {"description": "估算价格币种", "type": "string", "default": "USD"},
-  "model_prices_json": {"description": "可选模型价格 JSON：以实际模型标识为键，每百万 Token 的 input/cached_input/output 单价；留空不显示费用", "type": "text", "default": "{}"}
+  "enabled": {
+    "description": "启用飞书 Agent 卡片",
+    "type": "bool",
+    "default": true
+  },
+  "platform_ids": {
+    "description": "生效的飞书实例",
+    "type": "list",
+    "default": [],
+    "hint": "留空表示所有飞书实例。填写 AstrBot 机器人配置中的实例 ID，可限制本插件生效范围。"
+  },
+  "enable_private": {
+    "description": "私聊使用卡片",
+    "type": "bool",
+    "default": true,
+    "hint": "开启后，机器人在私聊中使用本插件的卡片展示回复；关闭后使用 AstrBot 原生回复方式。"
+  },
+  "enable_group": {
+    "description": "群聊使用卡片",
+    "type": "bool",
+    "default": true,
+    "hint": "仅控制群聊回复是否使用本插件卡片。是否需要 @机器人、唤醒词以及哪些用户可使用，仍由 AstrBot 的机器人与权限设置决定；开启后不会自动回复所有群消息。"
+  },
+  "group_stop_initiator_only": {
+    "description": "群聊终止仅限发起人",
+    "type": "bool",
+    "default": true,
+    "hint": "开启：仅本次提问的发起人可终止。关闭：同群其他成员也可终止。私聊始终仅限发起人；此开关不改变表单等其他交互的权限。"
+  },
+  "image_roots": {
+    "description": "图片上传允许目录",
+    "type": "list",
+    "default": [],
+    "hint": "留空时允许 AstrBot 的 data/temp 和 data/plugin_data。自定义时每项填写一个机器人运行环境中的绝对目录路径，例如 /astrbot/data/temp；Docker 部署需填写容器内路径。自定义列表会替换默认目录。"
+  },
+  "show_process": {
+    "description": "显示折叠处理过程",
+    "type": "bool",
+    "default": true
+  },
+  "expand_process": {
+    "description": "默认展开处理过程",
+    "type": "bool",
+    "default": false
+  },
+  "show_tools": {
+    "description": "显示工具调用摘要",
+    "type": "bool",
+    "default": true
+  },
+  "show_sources": {
+    "description": "显示知识与数据来源",
+    "type": "bool",
+    "default": true
+  },
+  "show_usage": {
+    "description": "显示模型与用量",
+    "type": "bool",
+    "default": true
+  },
+  "update_interval": {
+    "description": "卡片更新间隔（秒）",
+    "type": "float",
+    "default": 1.5,
+    "hint": "默认 1.5 秒，允许范围 1–10 秒。数值越小，卡片更新越频繁。"
+  },
+  "price_currency": {
+    "description": "模型 Token 计价币种",
+    "type": "string",
+    "default": "USD",
+    "hint": "下方模型 Token 单价使用的币种，也是卡片估算费用显示的币种。例如 USD 表示美元，CNY 表示人民币。所有单价必须采用同一币种；修改币种仅改变标记，不自动换算价格。"
+  },
+  "model_prices_json": {
+    "description": "模型 Token 单价（JSON）",
+    "type": "text",
+    "default": "{}",
+    "hint": "可选；留空或填 {} 不显示费用。键须与回复卡片显示的“供应商标识/模型”完全一致。每百万 Token 的单价：input 为普通输入，cached_input 为缓存输入，output 为输出。下面仅为填写格式示例，数字不代表真实价格，请按供应商实际价格替换：\n{\n  \"provider-id/model-name\": {\n    \"input\": 1.0,\n    \"cached_input\": 0.1,\n    \"output\": 2.0\n  }\n}\n如有多个供应商或模型，为每个标识添加一组价格。需开启“显示模型与用量”；未返回用量时无法估算，缺少本轮模型价格时不显示费用。"
+  }
 }
