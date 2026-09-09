@@ -28,7 +28,7 @@ class CardTests(unittest.TestCase):
         self.assertEqual(process['background_color'], 'grey')
         self.assertIn('public plan', process['elements'][0]['content'])
         self.assertIn('icon', process['header'])
-        self.assertEqual(sum(e['tag'] == 'hr' for e in elements), 2)
+        self.assertEqual(sum(e['tag'] == 'hr' for e in elements), 1)
 
     def test_topic_heading_and_no_duplicate_quote(self):
         state = card.State(question='original question', text='## Topic summary\n\nFull answer', terminal='已完成')

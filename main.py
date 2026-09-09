@@ -1,4 +1,4 @@
-"""Installable AstrBot Star: Feishu Agent Card, preview 0.1.2."""
+"""Installable AstrBot Star: Feishu Agent Card, preview 0.1.3."""
 import asyncio
 import json
 import os
@@ -37,7 +37,7 @@ class FeishuAgentCard(Star):
         try:
             self.observer.install()
             self.enabled = True
-            self.logger.info("Feishu Agent Card 0.1.2 ready (AstrBot 4.28.0)")
+            self.logger.info("Feishu Agent Card 0.1.3 ready (AstrBot 4.28.0)")
         except Exception as exc:
             self.logger.warning("Feishu Agent Card disabled: %s", str(exc))
 

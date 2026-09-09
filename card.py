@@ -124,11 +124,6 @@ def render(state, config, part="", page=0, count=1, historical=False):
     elapsed = int((state.ended or time.monotonic()) - state.start)
     status = state.terminal or state.status
     elements = []
-    if config.get("show_process", True) and (state.steps or state.narratives):
-        process = "\n\n".join(state.narratives)
-        timeline = "\n".join(f"{t}s · {s}" for t, s in state.steps)
-        elements.append(panel("处理过程", "\n\n".join(x for x in (process, timeline) if x), config.get("expand_process", False)))
-    elements.append({"tag": "hr"})
     # Use a model-authored leading heading, never infer business intent from keywords.
     title = label(state.question, 60) or "回复结果"
     heading = re.match(r"\A\s{0,3}#{1,6}[^\S\n]+([^\n]+)(?:\n|$)", state.text or part)
@@ -144,6 +139,10 @@ def render(state, config, part="", page=0, count=1, historical=False):
     answer["margin"] = "8px 0px 16px 0px"
     elements.append(answer)
     elements.append({"tag": "hr"})
+    if config.get("show_process", True) and (state.steps or state.narratives):
+        process = "\n\n".join(state.narratives)
+        timeline = "\n".join(f"{t}s · {s}" for t, s in state.steps)
+        elements.append(panel("处理过程", "\n\n".join(x for x in (process, timeline) if x), config.get("expand_process", False)))
     if config.get("show_tools", True) and state.tools:
         lines = []
         for tool in state.tools[-16:]:
