@@ -1,4 +1,4 @@
-"""Installable AstrBot Star: Feishu Agent Card, preview 0.1.1."""
+"""Installable AstrBot Star: Feishu Agent Card, preview 0.1.2."""
 import asyncio
 import json
 import os
@@ -37,7 +37,7 @@ class FeishuAgentCard(Star):
         try:
             self.observer.install()
             self.enabled = True
-            self.logger.info("Feishu Agent Card 0.1.1 ready (AstrBot 4.28.0)")
+            self.logger.info("Feishu Agent Card 0.1.2 ready (AstrBot 4.28.0)")
         except Exception as exc:
             self.logger.warning("Feishu Agent Card disabled: %s", str(exc))
 
@@ -122,6 +122,11 @@ class FeishuAgentCard(Star):
         session = await self.ensure(event)
         if session:
             session.state.step("正在准备模型请求")
+            presentation = ("飞书卡片展示格式：最终回答请以一行简短、准确概括本次回答主题的 Markdown 二级标题"
+                            "（## 主题）开头，随后空行再写正文。不要用‘回答’作为标题，不要重复用户原问题；"
+                            "工具调用前的过程说明无需标题。若用户明确指定其他输出格式，则优先遵循用户要求。")
+            if presentation not in (req.system_prompt or ""):
+                req.system_prompt = (req.system_prompt or "") + "\n\n" + presentation
 
     @filter.on_agent_begin()
     async def begin(self, event, run_context):

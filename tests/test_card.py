@@ -30,6 +30,18 @@ class CardTests(unittest.TestCase):
         self.assertIn('icon', process['header'])
         self.assertEqual(sum(e['tag'] == 'hr' for e in elements), 2)
 
+    def test_topic_heading_and_no_duplicate_quote(self):
+        state = card.State(question='original question', text='## Topic summary\n\nFull answer', terminal='已完成')
+        elements = card.render(state, {'show_question': True}, state.text)['body']['elements']
+        title = next(e for e in elements if e.get('element_id') == 'answer_title')
+        answer = next(e for e in elements if e.get('element_id') == 'answer_body')
+        self.assertEqual(title['content'], '**Topic summary**')
+        self.assertEqual(title['text_size'], 'heading')
+        self.assertEqual(answer['content'], 'Full answer')
+        self.assertNotIn('original question', json.dumps(elements))
+        fallback = card.render(card.State(question='Topic'), {}, 'Plain answer')['body']['elements']
+        self.assertEqual(next(e for e in fallback if e.get('element_id') == 'answer_body')['content'], 'Plain answer')
+
     def test_long_unicode_lossless(self):
         text = ('中文段落🐈\n' * 9000) + 'final'
         parts = card.pages(text)

@@ -124,14 +124,21 @@ def render(state, config, part="", page=0, count=1, historical=False):
     elapsed = int((state.ended or time.monotonic()) - state.start)
     status = state.terminal or state.status
     elements = []
-    if config.get("show_question", True) and state.question:
-        elements.append(md("> " + label(state.question, 240), secondary=True))
     if config.get("show_process", True) and (state.steps or state.narratives):
         process = "\n\n".join(state.narratives)
         timeline = "\n".join(f"{t}s · {s}" for t, s in state.steps)
         elements.append(panel("处理过程", "\n\n".join(x for x in (process, timeline) if x), config.get("expand_process", False)))
     elements.append({"tag": "hr"})
-    elements.append(md("**回答**" if part else "**正在处理**"))
+    # Use a model-authored leading heading, never infer business intent from keywords.
+    title = label(state.question, 60) or "回复结果"
+    heading = re.match(r"\A\s{0,3}#{1,6}[^\S\n]+([^\n]+)(?:\n|$)", state.text or part)
+    if heading and ("\n" in heading.group(0) or state.terminal):
+        title = label(heading.group(1).rstrip("# "), 100) or title
+        if page == 0 and part.startswith(heading.group(0)):
+            part = part[len(heading.group(0)):].lstrip("\n")
+    title_element = md("**" + title + "**")
+    title_element.update(text_size="heading", element_id="answer_title")
+    elements.append(title_element)
     answer = md(part or ("本页内容已输出。" if historical else "已收到，正在处理你的请求…"))
     answer["element_id"] = "answer_body"
     answer["margin"] = "8px 0px 16px 0px"
