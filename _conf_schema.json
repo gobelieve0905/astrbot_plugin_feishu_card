@@ -3,6 +3,7 @@
   "platform_ids": {"description": "生效的飞书实例 ID（空列表代表全部飞书实例）", "type": "list", "default": []},
   "enable_private": {"description": "私聊生效", "type": "bool", "default": true},
   "enable_group": {"description": "群聊生效（沿用宿主唤醒与权限规则）", "type": "bool", "default": true},
+  "image_roots": {"description": "卡片图片上传允许目录（空列表使用 AstrBot data/temp 与 data/plugin_data）", "type": "list", "default": []},
   "show_process": {"description": "显示折叠处理过程", "type": "bool", "default": true},
   "expand_process": {"description": "默认展开处理过程", "type": "bool", "default": false},
   "show_tools": {"description": "显示工具调用摘要", "type": "bool", "default": true},

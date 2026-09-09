@@ -42,6 +42,34 @@ class CardTests(unittest.TestCase):
         fallback = card.render(card.State(question='Topic'), {}, 'Plain answer')['body']['elements']
         self.assertEqual(next(e for e in fallback if e.get('element_id') == 'answer_body')['content'], 'Plain answer')
 
+    def test_native_document_keeps_layout_and_auxiliary_order(self):
+        native = {'schema': '2.0', 'header': {'title': {'tag': 'plain_text', 'content': 'Native title'}},
+                  'body': {'elements': [{'tag': 'column_set', 'columns': []},
+                                        {'tag': 'markdown', 'content': '```python\nprint(1)\n```'}]}}
+        state = card.State(rich_card=native)
+        state.step('processing')
+        result = card.render(state, {}, 'fallback')
+        self.assertEqual(result['header'], native['header'])
+        self.assertEqual(result['body']['elements'][:2], native['body']['elements'])
+        self.assertEqual(len(native['body']['elements']), 2)
+        self.assertEqual(result['body']['elements'][2]['tag'], 'hr')
+        self.assertEqual(result['body']['elements'][3]['tag'], 'collapsible_panel')
+
+    def test_code_pages_keep_fences_and_lossless_source(self):
+        source = '```python\n' + ('print("test")\n' * 2000) + '```'
+        chunks = card.pages(source)
+        self.assertEqual(''.join(chunks), source)
+        for i, chunk in enumerate(chunks):
+            display = card.markdown_page(source, chunk, i)
+            self.assertTrue(display.startswith('```python\n'))
+            self.assertTrue(display.rstrip().endswith('```'))
+        titled = '## Code example\n\n' + source
+        state = card.State(text=titled, terminal='已完成')
+        first = card.render(state, {}, card.pages(titled)[0])
+        content = next(e['content'] for e in first['body']['elements'] if e.get('element_id') == 'answer_body')
+        self.assertTrue(content.startswith('```python\n'))
+        self.assertTrue(content.rstrip().endswith('```'))
+
     def test_long_unicode_lossless(self):
         text = ('中文段落🐈\n' * 9000) + 'final'
         parts = card.pages(text)

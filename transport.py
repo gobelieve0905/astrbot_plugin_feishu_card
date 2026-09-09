@@ -1,7 +1,9 @@
 """CardKit API only; reuses the adapter client, never opens a websocket."""
 import asyncio
 import json
+import io
 import uuid
+from .card import safe_text
 
 from lark_oapi.api.cardkit.v1 import (
     Card, CreateCardRequest, CreateCardRequestBody,
@@ -23,7 +25,7 @@ class Transport:
         ).build()
         resp = await asyncio.wait_for(self.bot.cardkit.v1.card.acreate(req), 12)
         if not resp.success() or not resp.data or not resp.data.card_id:
-            raise DeliveryError(f"card_create:{resp.code}")
+            raise DeliveryError(f"card_create:{resp.code}: {safe_text(resp.msg, 260)}")
         return resp.data.card_id
 
     async def update(self, card_id, body, sequence):
@@ -33,4 +35,13 @@ class Transport:
         ).build()
         resp = await asyncio.wait_for(self.bot.cardkit.v1.card.aupdate(req), 12)
         if not resp.success():
-            raise DeliveryError(f"card_update:{resp.code}")
+            raise DeliveryError(f"card_update:{resp.code}: {safe_text(resp.msg, 260)}")
+
+    async def upload_image(self, content):
+        from lark_oapi.api.im.v1 import CreateImageRequest, CreateImageRequestBody
+        req = CreateImageRequest.builder().request_body(CreateImageRequestBody.builder()
+            .image_type("message").image(io.BytesIO(content)).build()).build()
+        resp = await asyncio.wait_for(self.bot.im.v1.image.acreate(req), 20)
+        if not resp.success() or not resp.data or not resp.data.image_key:
+            raise DeliveryError(f"image_upload:{resp.code}")
+        return resp.data.image_key

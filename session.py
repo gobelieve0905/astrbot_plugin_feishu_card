@@ -9,6 +9,7 @@ from astrbot.api.message_components import Plain, Json
 
 from .card import State, pages, render, safe_text
 from .transport import Transport
+from .interactions import RESUME
 
 
 class Session:
@@ -17,6 +18,11 @@ class Session:
         self.state = State(question=event.message_str)
         self.transport = Transport(event.bot)
         self.cards, self.sequences, self.sent_bodies = [], [], []
+        previous = event.get_extra(RESUME) if hasattr(event, 'get_extra') else None
+        if previous:
+            self.cards = list(previous.cards)
+            self.sequences = list(previous.sequences)
+            self.sent_bodies = [""] * len(self.cards)
         self.closed = False
         self.stream_active = False
         self.done_received = False
@@ -68,7 +74,7 @@ class Session:
 
     async def flush(self):
         async with self.lock:
-            parts = pages(self.state.text)
+            parts = [self.state.text] if self.state.rich_card else pages(self.state.text)
             visible_count = len(parts)
             parts.extend(["过程内容已收起，完整回答请查看前面的回答页。"] * max(0, len(self.cards) - len(parts)))
             for index, part in enumerate(parts):
@@ -93,8 +99,26 @@ class Session:
                     self.plugin.remember(self, self.cards[index], self.sequences[index])
                     self.sent_bodies[index] = encoded
 
+    async def present(self, card, fallback):
+        if self.closed:
+            raise ValueError("This reply is already closed.")
+        # Preflight an unposted card, so schema errors reach the model for correction.
+        probe = State(rich_card=card, text=fallback)
+        await self.transport.create(render(probe, self.plugin.config, fallback))
+        async with self.lock:
+            previous = (self.state.rich_card, self.state.text)
+            self.state.rich_card, self.state.text = card, fallback
+        try:
+            await self.flush()
+        except Exception:
+            async with self.lock:
+                self.state.rich_card, self.state.text = previous
+            raise
+
     def archive_progress(self):
         """A host tool boundary identifies public interim text, without keyword parsing."""
+        if self.state.rich_card:
+            return
         text = self.state.text.strip()
         if text:
             self.state.narratives.append(safe_text(text, 2400))
@@ -118,7 +142,7 @@ class Session:
                 continue
             else:
                 rest.append(component)
-        if texts and not self.failed:
+        if texts and not self.failed and not self.state.rich_card:
             value = "".join(texts)
             if value and value != self.state.text:
                 self.state.text += ("\n\n" if self.state.text else "") + value
@@ -153,7 +177,7 @@ class Session:
                 rest = []
                 for component in chain.chain:
                     if isinstance(component, Plain):
-                        if not self.failed:
+                        if not self.failed and not self.state.rich_card:
                             self.state.text += component.text
                     elif isinstance(component, Json) and isinstance(component.data, dict) and component.data.get("type") == "lark_collapsible_panel_reasoning":
                         continue
@@ -180,7 +204,7 @@ class Session:
         if self.task:
             self.task.cancel()
             await asyncio.gather(self.task, return_exceptions=True)
-        if not self.failed and self.final_text:
+        if not self.failed and self.final_text and not self.state.rich_card:
             self.state.text = self.final_text
         self.state.ended = time.monotonic()
         self.state.terminal = status or self.state.terminal or ("本轮未完成" if self.failed or not self.done_received else "已完成")

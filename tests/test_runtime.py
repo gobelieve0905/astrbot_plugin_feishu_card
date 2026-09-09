@@ -36,6 +36,24 @@ class FakeEvent:
     def __init__(self):
         self.sent = []
         self.native = []
+        self.extras = {}
+        self.session = SimpleNamespace(session_id='test-session')
+
+    def get_extra(self, key):
+        return self.extras.get(key)
+
+    def set_extra(self, key, value):
+        self.extras[key] = value
+
+    def get_platform_id(self):
+        return 'test-platform'
+
+    def get_self_id(self):
+        return "test-bot"
+
+    def get_sender_id(self):
+        return 'test-user'
+
 
     async def send(self, chain):
         self.native.append(chain)
@@ -190,6 +208,71 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         await event.send_streaming(stream())
         self.assertEqual(session.state.text, 'complete final answer')
         self.assertEqual(session.state.narratives, ['public plan'])
+
+    async def test_native_card_survives_final_text_and_failure_fallback(self):
+        event, session = await self.new_session()
+        card = {'schema': '2.0', 'body': {'elements': [{'tag': 'markdown', 'content': '```python\nprint(1)\n```'}]}}
+        await session.present(card, 'Complete fallback')
+        session.final_text = 'Card is ready'
+        session.done_received = True
+        await session.finish()
+        self.assertEqual(session.state.text, 'Complete fallback')
+        self.assertEqual(session.transport.bodies[-1]['body']['elements'][0]['content'], card['body']['elements'][0]['content'])
+        event, session = await self.new_session()
+        await session.present(card, 'Complete fallback')
+        session.transport.fail = True
+        session.done_received = True
+        await session.finish()
+        self.assertIn('Complete fallback', event.native[0].get_plain_text())
+
+    async def test_callback_authorization_one_shot_and_same_card_resume(self):
+        from lark_oapi import EventDispatcherHandler
+        from lark_oapi.event.callback.model.p2_card_action_trigger import P2CardActionTrigger
+        from copy import deepcopy
+        interactions = importlib.import_module(package + '.interactions')
+        rich = importlib.import_module(package + '.rich')
+        event, session = await self.new_session()
+        queue = []
+        def create_event(message):
+            e = FakeEvent()
+            e.message_obj = message
+            e.message_str = message.message_str
+            return e
+        platform = SimpleNamespace(connection_mode='socket', event_handler=EventDispatcherHandler.builder('', '').build(),
+            meta=lambda: SimpleNamespace(id='test-platform'), create_event=create_event, commit_event=queue.append)
+        self.plugin.context = SimpleNamespace(platform_manager=SimpleNamespace(get_insts=lambda: [platform]))
+        manager = interactions.Interactions(self.plugin)
+        try:
+            card = deepcopy(rich.RECIPES['button'])
+            token = manager.bind(card, session)
+            value = card['body']['elements'][0]['behaviors'][0]['value']
+            def payload(user):
+                return P2CardActionTrigger({'event': {'operator': {'open_id': user}, 'action': {'value': value, 'form_value': {'input': 'test'}}}})
+            self.assertIn('发起人', manager.receive(platform, payload('someone-else')).toast.content)
+            self.assertIn('仍在处理', manager.receive(platform, payload('test-user')).toast.content)
+            session.done_received = True
+            await session.finish()
+            self.assertIn('已收到', manager.receive(platform, payload('test-user')).toast.content)
+            self.assertEqual(len(queue), 1)
+            manager.receive(platform, payload('test-user'))
+            self.assertEqual(len(queue), 1)
+            resumed = session_module.Session(self.plugin, queue[0])
+            self.assertEqual(resumed.cards, session.cards)
+            await resumed.start()
+            self.assertEqual(queue[0].sent, [])
+            await resumed.finish('test completed')
+        finally:
+            manager.close()
+        self.assertNotIn('p2.card.action.trigger', platform.event_handler._callback_processor_map)
+
+    async def test_native_tools_registered_and_schema_errors_are_returned(self):
+        main = importlib.import_module(package + '.main')
+        plugin = object.__new__(main.FeishuAgentCard)
+        event, session = await self.new_session()
+        async def ensure(event): return session
+        plugin.ensure = ensure
+        result = await plugin.card_render(event, '{bad json', 'fallback')
+        self.assertIn('未完成更新', result)
 
     async def test_observer_restore(self):
         from astrbot.core.agent.runners.tool_loop_agent_runner import ToolLoopAgentRunner

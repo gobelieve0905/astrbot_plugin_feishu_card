@@ -1,5 +1,6 @@
 """Platform-neutral rendering. Never interprets business questions or raw reasoning."""
 from dataclasses import dataclass, field
+import copy
 import ipaddress
 import json
 import re
@@ -56,6 +57,28 @@ def pages(text, limit=10000):
     return result or [""]
 
 
+def markdown_page(full_text, part, page):
+    """Balance display fences across pages without modifying stored answer bytes."""
+    chunks = pages(full_text)
+    if page >= len(chunks) or chunks[page] != part:
+        return part
+    prefix = "".join(chunks[:page])
+    def scan(text, opened=None):
+        for line in text.splitlines():
+            match = re.match(r"^ {0,3}(`{3,}|~{3,})(.*)$", line)
+            if not match:
+                continue
+            fence, tail = match.groups()
+            if opened is None:
+                opened = (fence, tail)
+            elif fence[0] == opened[0][0] and len(fence) >= len(opened[0]) and not tail.strip():
+                opened = None
+        return opened
+    before = scan(prefix)
+    after = scan(part, before)
+    return ((before[0] + before[1] + "\n") if before else "") + part + (("\n" + after[0]) if after else "")
+
+
 def panel(title, text, expanded=False):
     return {"tag": "collapsible_panel", "expanded": expanded,
             "background_color": "grey", "padding": "8px 12px 8px 12px",
@@ -70,6 +93,7 @@ def panel(title, text, expanded=False):
 @dataclass
 class State:
     question: str = ""
+    rich_card: dict | None = None
     start: float = field(default_factory=time.monotonic)
     status: str = "已收到，正在排队"
     text: str = ""
@@ -124,6 +148,7 @@ def render(state, config, part="", page=0, count=1, historical=False):
     elapsed = int((state.ended or time.monotonic()) - state.start)
     status = state.terminal or state.status
     elements = []
+    display_part = markdown_page(state.text, part, page)
     # Use a model-authored leading heading, never infer business intent from keywords.
     title = label(state.question, 60) or "回复结果"
     heading = re.match(r"\A\s{0,3}#{1,6}[^\S\n]+([^\n]+)(?:\n|$)", state.text or part)
@@ -131,10 +156,11 @@ def render(state, config, part="", page=0, count=1, historical=False):
         title = label(heading.group(1).rstrip("# "), 100) or title
         if page == 0 and part.startswith(heading.group(0)):
             part = part[len(heading.group(0)):].lstrip("\n")
+            display_part = display_part[len(heading.group(0)):].lstrip("\n")
     title_element = md("**" + title + "**")
     title_element.update(text_size="heading", element_id="answer_title")
     elements.append(title_element)
-    answer = md(part or ("本页内容已输出。" if historical else "已收到，正在处理你的请求…"))
+    answer = md(display_part if part else ("本页内容已输出。" if historical else "已收到，正在处理你的请求…"))
     answer["element_id"] = "answer_body"
     answer["margin"] = "8px 0px 16px 0px"
     elements.append(answer)
@@ -177,9 +203,17 @@ def render(state, config, part="", page=0, count=1, historical=False):
     elements.append(md("你可以继续发送消息。", secondary=True))
     body = {"schema": "2.0", "config": {"wide_screen_mode": True, "update_multi": True,
             "summary": {"content": f"{status} · 飞书 Agent 卡片"}}, "body": {"elements": elements}}
+    optional_panels = [e for e in elements if e.get("tag") == "collapsible_panel"]
+    if state.rich_card and page == 0:
+        native = copy.deepcopy(state.rich_card)
+        # Append the same auxiliary area after native answer components.
+        answer_end = next(i for i, e in enumerate(elements) if e.get("element_id") == "answer_body")
+        native["body"]["elements"].extend(elements[answer_end + 1:])
+        body = native
+        elements = body["body"]["elements"]
     # Keep answer text lossless. Trim only optional display rows at whole-line boundaries.
     while len(json.dumps(body, ensure_ascii=False).encode("utf-8")) > 26000:
-        candidates = [e for e in elements if e.get("tag") == "collapsible_panel"]
+        candidates = [e for e in optional_panels if e in elements]
         if not candidates:
             break
         largest = max(candidates, key=lambda e: len(e["elements"][0]["content"].encode("utf-8")))
