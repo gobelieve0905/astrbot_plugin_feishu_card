@@ -1,8 +1,15 @@
 name: astrbot_plugin_feishu_agent_card
 display_name: 飞书 Agent 卡片
-desc: 为飞书 Agent 回复提供即时反馈、同卡更新、折叠过程、工具与来源、真实用量及失败终态。
+short_desc: 飞书原生卡片、交互续聊、实时状态与终止回答
+desc: 为飞书 Agent 提供实时卡片回复、代码/表格/图表/图片展示、交互表单续聊、终止回答，以及处理过程、工具来源和 Token 用量。当前仅支持 AstrBot 4.28.0，交互需飞书长连接及卡片回调订阅。
 version: 0.2.4
 author: Kingboat
 astrbot_version: '>=4.28.0,<4.28.1'
 support_platforms:
   - lark
+repo: https://github.com/gobelieve0905/astrbot_plugin_feishu_card
+social_link: https://github.com/gobelieve0905
+tags:
+  - 飞书
+  - 卡片
+  - Agent
