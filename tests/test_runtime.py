@@ -20,6 +20,13 @@ class FakeTransport:
     def __init__(self, bot):
         self.bodies = []
         self.fail = False
+        self.files = []
+        self.file_fail = False
+
+    async def reply_file(self, content, filename, message_id):
+        if self.file_fail:
+            raise RuntimeError("file unavailable")
+        self.files.append((content, filename, message_id))
 
     async def create(self, body):
         return 'test-card-' + str(next(self.ids))
@@ -94,6 +101,33 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.plugin.sessions.add(session)
         await session.start()
         return event, session
+
+    async def test_download_toggle_and_terminal_idempotence(self):
+        for enabled in (False, True):
+            self.plugin.config['enable_reply_download'] = enabled
+            event, session = await self.new_session()
+            session.done_received = True
+            session.final_text = 'full reply'
+            await session.finish()
+            await session.finish()
+            self.assertEqual(len(session.transport.files), int(enabled))
+            if enabled:
+                import io, zipfile
+                data, name, target = session.transport.files[0]
+                self.assertEqual(target, event.message_obj.message_id)
+                with zipfile.ZipFile(io.BytesIO(data)) as z:
+                    self.assertEqual(z.read('reply.md').decode(), 'full reply')
+                self.assertIn('ZIP', session.state.download_status)
+
+    async def test_download_failure_preserves_answer(self):
+        event, session = await self.new_session()
+        session.transport.file_fail = True
+        session.done_received = True
+        session.final_text = 'answer survives'
+        await session.finish()
+        self.assertEqual(session.state.text, 'answer survives')
+        self.assertIn('附件发送失败', session.state.download_status)
+        self.assertNotIn(session, self.plugin.sessions)
 
     async def test_first_card_before_model_and_single_delivery(self):
         event, session = await self.new_session()

@@ -92,6 +92,7 @@ def panel(title, text, expanded=False):
 
 @dataclass
 class State:
+    download_status: str = ""
     question: str = ""
     rich_card: dict | None = None
     stop_value: dict | None = None
@@ -207,7 +208,7 @@ def render(state, config, part="", page=0, count=1, historical=False):
                          "type": "danger", "disabled": state.stopping,
                          "behaviors": [{"type": "callback", "value": state.stop_value}]})
     elements.append(md(" · ".join(footer), secondary=True))
-    elements.append(md("你可以继续发送消息。", secondary=True))
+    elements.append(md("你可以继续发送消息。" + (" " + state.download_status if state.download_status else ""), secondary=True))
     body = {"schema": "2.0", "config": {"wide_screen_mode": True, "update_multi": True,
             "summary": {"content": f"{status} · 飞书 Agent 卡片"}}, "body": {"elements": elements}}
     optional_panels = [e for e in elements if e.get("tag") == "collapsible_panel"]

@@ -1,4 +1,4 @@
-"""Installable AstrBot Star: Feishu Agent Card, preview 0.2.5."""
+"""Installable AstrBot Star: Feishu Agent Card, preview 0.2.6."""
 import asyncio
 import json
 import os
@@ -42,7 +42,7 @@ class FeishuAgentCard(Star):
             self.observer.install()
             self.enabled = True
             self.interactions.install()
-            self.logger.info("Feishu Agent Card 0.2.5 ready (AstrBot 4.28.0)")
+            self.logger.info("Feishu Agent Card 0.2.6 ready (AstrBot 4.28.0)")
         except Exception as exc:
             self.logger.warning("Feishu Agent Card disabled: %s", str(exc))
 
@@ -134,7 +134,7 @@ class FeishuAgentCard(Star):
             presentation += (" 复杂结果可调用 feishu_card_guide 查看原生卡片组件示例，使用 feishu_card_render"
                              "呈现代码、表格、图表、图片、多栏、按钮或表单。按场景选择合适组件，不必每次都用卡片工具。"
                              "交互行为 value.action 描述用户点击后希望继续的任务。工具成功后无需重复正文。"
-                             "名称、标识符和数据须完整输出，不得用省略号缩写；宽表或超长字段优先逐条展示。")
+                             "名称、标识符和数据须完整输出，不得用省略号缩写；宽表使用原生 table 组件，由插件设置像素列宽；不要另加逐行明细面板。")
             if presentation not in (req.system_prompt or ""):
                 req.system_prompt = (req.system_prompt or "") + "\n\n" + presentation
 

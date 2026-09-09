@@ -1,8 +1,10 @@
 """Native card documents and component recipes; no business routing."""
 import copy
 import json
-import html
-import re
+import csv
+import io
+import zipfile
+import unicodedata
 
 DOCS = 'https://open.feishu.cn/document/feishu-cards/'
 RECIPES = {
@@ -42,7 +44,7 @@ def guide(component='all'):
         'docs': DOCS + 'card-json-v2-structure',
         'rules': ['Use code fences with language for code; never execute code merely to display it.',
                   'Choose table for exact comparisons, chart for trends, columns for side-by-side summaries.',
-                  'Keep identifiers and names complete: never abbreviate or replace suffixes with ellipses. Tables use automatic row height; long cells also receive a full-width detail panel. Use row-oriented text for very wide records.',
+                  'Keep identifiers and names complete: never abbreviate or replace suffixes with ellipses. Tables use automatic row height; the plugin sets pixel column widths for native horizontal scrolling. Never duplicate tables as row-by-row detail panels.',
                   'Use feishu_card_upload_image for local generated image assets, then pass the returned img_key; never invent resource keys or business data.',
                   'Callback behaviors use value.action to describe the requested continuation; plugin binds the operator and current conversation.',
                   'After successful rendering, do not repeat the card in the final text. Supply a complete fallback_text.',
@@ -69,7 +71,7 @@ def parse_card(card_json):
     result['config']['wide_screen_mode'] = True
     expand_tables(result)
     if len(json.dumps(result, ensure_ascii=False).encode()) > 24000:
-        raise ValueError('Full table details exceed the card budget. Use a row-oriented Markdown reply with ALL original values so the plugin can paginate it; do not abbreviate or omit rows.')
+        raise ValueError('Table exceeds the card budget. Split the output into smaller views while preserving ALL original values; do not abbreviate or omit rows.')
     return result
 
 
@@ -81,50 +83,67 @@ def display_value(value):
     return json.dumps(value, ensure_ascii=False)
 
 
-def escaped_cell(value):
-    # Cell data remains literal; do not turn a name into a link or card markup.
-    return re.sub(r"([\\`*_\[\]#|~])", r"\\\1", html.escape(display_value(value), quote=False))
-
-
 def expand_tables(node):
-    """Add full-width data views to long/wide tables, leaving every source cell intact."""
+    """Size native columns for overflow; never duplicate or truncate source rows."""
     if isinstance(node, list):
         for child in node:
             expand_tables(child)
     elif isinstance(node, dict):
-        for key, children in list(node.items()):
-            if key != 'elements' or not isinstance(children, list):
+        if node.get('tag') == 'table':
+            columns, rows = node.get('columns', []), node.get('rows', [])
+            if columns and all(isinstance(c, dict) for c in columns) and all(isinstance(r, dict) for r in rows):
+                node['row_height'] = 'auto'
+                for column in columns:
+                    values = [display_value(column.get('display_name', column.get('name', '')))]
+                    values += [display_value(row.get(column.get('name'), '')) for row in rows]
+                    units = max((sum(2 if unicodedata.east_asian_width(c) in 'WF' else 1
+                                     for c in line) for value in values for line in value.splitlines()), default=0)
+                    # Pixel widths preserve overflow; percentage/auto widths squeeze long identifiers.
+                    needed = min(600, max(120, units * 9 + 32))
+                    existing = column.get('width', '')
+                    if isinstance(existing, str) and existing.endswith('px'):
+                        try:
+                            needed = max(needed, int(existing[:-2]))
+                        except ValueError:
+                            pass
+                    column['width'] = f'{needed}px'
+        for key, value in node.items():
+            if key not in ('rows', 'chart_spec'):
+                expand_tables(value)
+
+
+def reply_archive(state):
+    """Export only delivered answer data in memory; omit runtime callback capabilities."""
+    output = io.BytesIO()
+    native = copy.deepcopy(state.rich_card)
+    tables = []
+    def clean(node):
+        if isinstance(node, list):
+            for child in node:
+                clean(child)
+        elif isinstance(node, dict):
+            if node.get('tag') == 'table':
+                tables.append(node)
+            if isinstance(node.get('behaviors'), list):
+                node['behaviors'] = [b for b in node['behaviors'] if b.get('type') != 'callback']
+            for key, value in node.items():
                 if key not in ('rows', 'chart_spec'):
-                    expand_tables(children)
-                continue
-            expanded = []
-            for element in children:
-                expand_tables(element)
-                expanded.append(element)
-                if not isinstance(element, dict) or element.get('tag') != 'table':
-                    continue
-                columns, rows = element.get('columns', []), element.get('rows', [])
-                if not columns or not rows or not all(isinstance(c, dict) for c in columns) or not all(isinstance(r, dict) for r in rows):
-                    continue
-                element['row_height'] = 'auto'
-                long_names = {c.get('name') for c in columns if any(len(display_value(r.get(c.get('name'), ''))) > 28 for r in rows)}
-                if not long_names and len(columns) <= 4:
-                    continue
-                if len(columns) == 2 and len(long_names) == 1 and not any('width' in c for c in columns):
-                    for column in columns:
-                        column['width'] = '70%' if column.get('name') in long_names else '30%'
-                details = []
-                for index, row in enumerate(rows, 1):
-                    lines = [f"**第 {index} 行**"]
-                    for column in columns:
-                        name = column.get('name')
-                        if name in row:
-                            title = column.get('display_name') or name
-                            lines.append(f"**{escaped_cell(title)}**：{escaped_cell(row[name])}")
-                    details.append({'tag': 'markdown', 'content': '\n\n'.join(lines), 'text_size': 'normal'})
-                expanded.append({'tag': 'collapsible_panel', 'expanded': False,
-                    'header': {'title': {'tag': 'plain_text', 'content': f'完整表格内容（{len(rows)} 行）'},
-                               'icon': {'tag': 'standard_icon', 'token': 'down-small-ccm_outlined', 'size': '16px 16px'},
-                               'icon_position': 'follow_text', 'icon_expanded_angle': -180},
-                    'elements': details})
-            node[key] = expanded
+                    clean(value)
+    clean(native)
+    with zipfile.ZipFile(output, 'w', zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr('reply.md', state.text)
+        archive.writestr('README.txt', '回复状态：' + state.terminal +
+            '\nreply.md 为完整正文或原生卡片文字兜底。card.json 保留原生组件数据（已移除交互回调）。'
+            '\n表格另存为 CSV，保留所有已提交行；图表数据在 card.json 中。图片为飞书资源引用，未打包图片二进制。'
+            '\n导出不含隐藏推理、工具原始参数、聊天历史或内部配置。\n')
+        if native:
+            archive.writestr('card.json', json.dumps(native, ensure_ascii=False, indent=2))
+        for i, table in enumerate(tables, 1):
+            csv_text = io.StringIO(newline='')
+            writer = csv.writer(csv_text)
+            columns = table.get('columns', [])
+            writer.writerow([c.get('display_name', c.get('name', '')) for c in columns])
+            for row in table.get('rows', []):
+                writer.writerow([display_value(row.get(c.get('name'), '')) for c in columns])
+            archive.writestr(f'tables/table-{i}.csv', csv_text.getvalue().encode('utf-8-sig'))
+    return output.getvalue()

@@ -90,46 +90,57 @@ class CardTests(unittest.TestCase):
             state.terminal = '已终止'
             self.assertNotIn('stop_answer', str(card.render(state, {}, 'partial')))
 
-    def test_long_table_keeps_all_values_in_full_width_details(self):
+    def test_long_table_uses_pixel_width_without_details(self):
         name = 'Example_Identifier_With_Multiple_Segments_And_Unique_Suffix_123456789'
-        source = {'schema': '2.0', 'body': {'elements': [{'tag': 'table', 'row_height': 'low',
-            'columns': [{'name': 'name', 'display_name': 'Name', 'data_type': 'text'},
-                        {'name': 'value', 'display_name': 'Value', 'data_type': 'number'}],
-            'rows': [{'name': name, 'value': 123.456}, {'name': 'short', 'value': 0}]}]}}
+        source = {'schema': '2.0', 'body': {'elements': [{'tag': 'table',
+            'columns': [{'name': 'name', 'width': '70%'}, {'name': 'value', 'width': '30%'}],
+            'rows': [{'name': name, 'value': 123.456}]}]}}
         prepared = rich.parse_card(json.dumps(source))
-        table, details = prepared['body']['elements']
+        self.assertEqual(len(prepared['body']['elements']), 1)
+        table = prepared['body']['elements'][0]
         self.assertEqual(table['rows'], source['body']['elements'][0]['rows'])
         self.assertEqual(table['row_height'], 'auto')
-        self.assertEqual([c['width'] for c in table['columns']], ['70%', '30%'])
-        text = str(details)
-        self.assertIn(rich.escaped_cell(name), details['elements'][0]['content'])
-        self.assertIn('123.456', text)
-        self.assertIn('short', text)
-        self.assertIn('0', details['elements'][1]['content'])
-        state = card.State(rich_card=prepared)
-        state.narratives = ['metadata ' * 4000]
-        rendered = card.render(state, {}, 'fallback')
-        self.assertEqual(rendered['body']['elements'][1], details)
+        self.assertEqual(table['columns'][0]['width'], '600px')
+        self.assertTrue(all(c['width'].endswith('px') for c in table['columns']))
+        self.assertEqual(source['body']['elements'][0]['columns'][0]['width'], '70%')
 
     def test_wide_nested_tables_and_short_tables(self):
-        table = {'tag': 'table', 'columns': [{'name': str(i), 'width': '100px'} for i in range(5)],
+        table = {'tag': 'table', 'columns': [{'name': str(i), 'width': '300px'} for i in range(5)],
                  'rows': [{str(i): i for i in range(5)}]}
         source = {'schema': '2.0', 'body': {'elements': [{'tag': 'column_set', 'columns': [
             {'tag': 'column', 'elements': [table]}]}]}}
         result = rich.parse_card(json.dumps(source))
         elements = result['body']['elements'][0]['columns'][0]['elements']
-        self.assertEqual(len(elements), 2)
+        self.assertEqual(len(elements), 1)
         self.assertEqual(elements[0]['rows'], table['rows'])
-        self.assertTrue(all(c['width'] == '100px' for c in elements[0]['columns']))
-        result = rich.parse_card(json.dumps(rich.RECIPES['table']))
-        self.assertEqual(len(result['body']['elements']), 1)
+        self.assertTrue(all(c['width'] == '300px' for c in elements[0]['columns']))
 
-    def test_expanded_table_budget_fails_without_dropping_values(self):
+    def test_large_table_keeps_every_value_without_duplication(self):
         source = {'schema': '2.0', 'body': {'elements': [{'tag': 'table',
             'columns': [{'name': 'name'}], 'rows': [{'name': 'x' * 8000}, {'name': 'y' * 8000}]}]}}
-        with self.assertRaisesRegex(ValueError, 'ALL original values'):
-            rich.parse_card(json.dumps(source))
-        self.assertEqual(len(source['body']['elements'][0]['rows']), 2)
+        parsed = rich.parse_card(json.dumps(source))
+        self.assertEqual(parsed['body']['elements'][0]['rows'], source['body']['elements'][0]['rows'])
+        self.assertEqual(len(parsed['body']['elements']), 1)
+
+    def test_download_preserves_answer_tables_and_strips_callbacks(self):
+        import io, zipfile, csv
+        text = '## Test\n```python\nprint("test")\n```\n' + '完整' * 20000
+        native = {'schema': '2.0', 'body': {'elements': [
+            {'tag': 'table', 'columns': [{'name': 'n'}, {'name': 'v'}],
+             'rows': [{'n': 'long_' * 100, 'v': 0}, {'n': 'comma,new\nline', 'v': 1.23}]},
+            {'tag': 'button', 'behaviors': [{'type': 'callback', 'value': {'feishu_card_binding': 'PRIVATE_BINDING'}}]}]}}
+        state = card.State(text=text, rich_card=native, terminal='已终止')
+        state.narratives = ['NOT_ANSWER']
+        with zipfile.ZipFile(io.BytesIO(rich.reply_archive(state))) as z:
+            self.assertEqual(z.read('reply.md').decode(), text)
+            raw = z.read('card.json').decode()
+            self.assertNotIn('PRIVATE_BINDING', raw)
+            self.assertNotIn('NOT_ANSWER', raw)
+            self.assertEqual(json.loads(raw)['body']['elements'][0]['rows'], native['body']['elements'][0]['rows'])
+            rows = list(csv.reader(io.StringIO(z.read('tables/table-1.csv').decode('utf-8-sig'))))
+            self.assertEqual(rows[1], ['long_' * 100, '0'])
+            self.assertEqual(rows[2], ['comma,new\nline', '1.23'])
+        self.assertIn('PRIVATE_BINDING', str(native))
 
     def test_long_unicode_lossless(self):
         text = ('中文段落🐈\n' * 9000) + 'final'

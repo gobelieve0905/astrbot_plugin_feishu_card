@@ -45,3 +45,19 @@ class Transport:
         if not resp.success() or not resp.data or not resp.data.image_key:
             raise DeliveryError(f"image_upload:{resp.code}")
         return resp.data.image_key
+
+    async def reply_file(self, content, filename, message_id):
+        from lark_oapi.api.im.v1 import (
+            CreateFileRequest, CreateFileRequestBody, ReplyMessageRequest, ReplyMessageRequestBody,
+        )
+        req = CreateFileRequest.builder().request_body(CreateFileRequestBody.builder()
+            .file_type("stream").file_name(filename).file(io.BytesIO(content)).build()).build()
+        resp = await asyncio.wait_for(self.bot.im.v1.file.acreate(req), 30)
+        if not resp.success() or not resp.data or not resp.data.file_key:
+            raise DeliveryError(f"file_upload:{resp.code}")
+        req = ReplyMessageRequest.builder().message_id(message_id).request_body(
+            ReplyMessageRequestBody.builder().msg_type("file")
+            .content(json.dumps({"file_key": resp.data.file_key})).uuid(str(uuid.uuid4())).build()).build()
+        resp = await asyncio.wait_for(self.bot.im.v1.message.areply(req), 15)
+        if not resp.success():
+            raise DeliveryError(f"file_reply:{resp.code}")
