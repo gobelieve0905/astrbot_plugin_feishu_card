@@ -94,6 +94,8 @@ def panel(title, text, expanded=False):
 class State:
     question: str = ""
     rich_card: dict | None = None
+    stop_value: dict | None = None
+    stopping: bool = False
     start: float = field(default_factory=time.monotonic)
     status: str = "已收到，正在排队"
     text: str = ""
@@ -199,6 +201,11 @@ def render(state, config, part="", page=0, count=1, historical=False):
     footer.extend([f"{elapsed}s", status])
     if count > 1:
         footer.append(f"第 {page + 1}/{count} 页")
+    if state.stop_value and not state.terminal:
+        elements.append({"tag": "button", "element_id": "stop_answer",
+                         "text": {"tag": "plain_text", "content": "正在终止…" if state.stopping else "终止回答"},
+                         "type": "danger", "disabled": state.stopping,
+                         "behaviors": [{"type": "callback", "value": state.stop_value}]})
     elements.append(md(" · ".join(footer), secondary=True))
     elements.append(md("你可以继续发送消息。", secondary=True))
     body = {"schema": "2.0", "config": {"wide_screen_mode": True, "update_multi": True,

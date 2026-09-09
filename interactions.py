@@ -14,6 +14,7 @@ class Interactions:
     def __init__(self, plugin):
         self.plugin = plugin
         self.bindings = {}
+        self.stops = {}
         self.installed = []
         self.loop = None
 
@@ -41,6 +42,20 @@ class Interactions:
                 handlers.pop('p2.card.action.trigger')
         self.installed.clear()
         self.bindings.clear()
+        self.stops.clear()
+
+    def bind_stop(self, session):
+        self.install()
+        platform = next((p for p, _, _ in self.installed if p.meta().id == session.event.get_platform_id()), None)
+        if platform is None:
+            return
+        token = secrets.token_urlsafe(24)
+        self.stops[token] = {'session': session, 'platform': platform, 'expires': float('inf'), 'kind': 'stop'}
+        session.state.stop_value = {'feishu_card_binding': token}
+
+    def release_stop(self, session):
+        self.stops = {k: v for k, v in self.stops.items() if v['session'] is not session}
+        session.state.stop_value = None
 
     def bind(self, card, session):
         self.install()
@@ -82,16 +97,28 @@ class Interactions:
             data = payload.event
             value = data.action.value or {}
             token = value.get('feishu_card_binding')
-            record = self.bindings.get(token)
+            record = self.stops.get(token) or self.bindings.get(token)
             if not record or record['platform'] is not platform or record['expires'] <= time.monotonic():
                 return self.toast('此操作已处理或卡片已过期，请发送消息继续。')
             session = record['session']
-            if data.operator.open_id != session.event.get_sender_id():
-                return self.toast('请由本次对话的发起人操作。', 'error')
-            origin_chat = getattr(getattr(session.event.message_obj, 'raw_message', None), 'chat_id', None)
+            group = session.event.get_group_id()
             clicked_chat = getattr(getattr(data, 'context', None), 'open_chat_id', None)
+            shared_stop = (record.get('kind') == 'stop' and bool(group)
+                           and self.plugin.config.get('group_stop_initiator_only', True) is False
+                           and clicked_chat == group)
+            operator = data.operator.open_id
+            if not operator or (operator != session.event.get_sender_id() and not shared_stop):
+                return self.toast('请由本次对话的发起人操作。', 'error')
+            origin_chat = getattr(getattr(session.event.message_obj, 'raw_message', None), 'chat_id', None) or group
             if origin_chat and clicked_chat != origin_chat:
                 return self.toast('请在原对话中操作此卡片。', 'error')
+            if record.get('kind') == 'stop':
+                if session.closed:
+                    return self.toast('本次回答已经结束。')
+                if session.stop_requested:
+                    return self.toast('正在终止，请稍候。')
+                session.request_stop()
+                return self.toast('已请求终止，将保留已输出的内容。', 'success')
             if not session.closed:
                 return self.toast('Agent 仍在处理，请完成后再操作。')
             slot = value.get('slot')

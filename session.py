@@ -17,6 +17,7 @@ class Session:
         self.state = State(question=event.message_str)
         self.transport = Transport(event.bot)
         self.cards, self.sequences, self.sent_bodies = [], [], []
+        self.stop_requested = False
         self.closed = False
         self.stream_active = False
         self.done_received = False
@@ -32,7 +33,14 @@ class Session:
         self.wrappers = {}
 
     async def start(self):
-        await self.flush()
+        if hasattr(self.plugin, 'interactions'):
+            self.plugin.interactions.bind_stop(self)
+        try:
+            await self.flush()
+        except BaseException:
+            if hasattr(self.plugin, 'interactions'):
+                self.plugin.interactions.release_stop(self)
+            raise
         self.state.step("已收到，等待 Agent 处理")
 
         async def send(_event, chain):
@@ -93,13 +101,24 @@ class Session:
                     self.plugin.remember(self, self.cards[index], self.sequences[index])
                     self.sent_bodies[index] = encoded
 
+    def request_stop(self):
+        if self.closed or self.stop_requested:
+            return
+        self.stop_requested = True
+        self.state.stopping = True
+        self.state.step("正在终止回答")
+        # Native host watcher cancels active model/tool work and finalizes agent history.
+        self.event.set_extra("agent_stop_requested", True)
+
     async def present(self, card, fallback):
-        if self.closed:
-            raise ValueError("This reply is already closed.")
+        if self.closed or self.stop_requested:
+            raise ValueError("This reply is closed or stopping.")
         # Preflight an unposted card, so schema errors reach the model for correction.
         probe = State(rich_card=card, text=fallback)
         await self.transport.create(render(probe, self.plugin.config, fallback))
         async with self.lock:
+            if self.stop_requested:
+                raise ValueError("This reply is stopping.")
             previous = (self.state.rich_card, self.state.text)
             self.state.rich_card, self.state.text = card, fallback
         try:
@@ -120,6 +139,8 @@ class Session:
             self.state.text = ""
 
     async def send(self, chain):
+        if self.stop_requested:
+            return
         if self.closed:
             # Restored after normal completion; an already captured caller still delegates.
             return await self.original_send(chain)
@@ -136,7 +157,7 @@ class Session:
                 continue
             else:
                 rest.append(component)
-        if texts and not self.failed and not self.state.rich_card:
+        if texts and not self.failed and not self.stop_requested and not self.state.rich_card:
             value = "".join(texts)
             if value and value != self.state.text:
                 self.state.text += ("\n\n" if self.state.text else "") + value
@@ -152,6 +173,8 @@ class Session:
         self.stream_active = True
         try:
             async for chain in generator:
+                if self.closed and self.stop_requested:
+                    return
                 if self.closed:
                     async def remaining():
                         yield chain
@@ -163,6 +186,8 @@ class Session:
                 if kind == "aborted":
                     self.state.terminal = "已取消 / 已中断"
                     continue
+                if self.stop_requested:
+                    continue
                 if kind in {"reasoning", "agent_stats", "tool_call", "tool_call_result"}:
                     continue
                 if kind == "break":
@@ -171,7 +196,7 @@ class Session:
                 rest = []
                 for component in chain.chain:
                     if isinstance(component, Plain):
-                        if not self.failed and not self.state.rich_card:
+                        if not self.failed and not self.stop_requested and not self.state.rich_card:
                             self.state.text += component.text
                     elif isinstance(component, Json) and isinstance(component.data, dict) and component.data.get("type") == "lark_collapsible_panel_reasoning":
                         continue
@@ -198,10 +223,19 @@ class Session:
         if self.task:
             self.task.cancel()
             await asyncio.gather(self.task, return_exceptions=True)
-        if not self.failed and self.final_text and not self.state.rich_card:
+        if not self.stop_requested and not self.failed and self.final_text and not self.state.rich_card:
             self.state.text = self.final_text
+        if hasattr(self.plugin, 'interactions'):
+            self.plugin.interactions.release_stop(self)
         self.state.ended = time.monotonic()
         self.state.terminal = status or self.state.terminal or ("本轮未完成" if self.failed or not self.done_received else "已完成")
+        if self.stop_requested:
+            self.state.terminal = "已终止"
+            for tool in self.state.tools:
+                if 'end' not in tool:
+                    tool.update(end=self.state.ended, status="已停止等待")
+        if self.stop_requested and not self.state.text.strip():
+            self.state.text = "已终止，本次未生成回答内容。"
         if not self.state.text.strip():
             self.state.text = "本轮未能生成回答，请稍后重试。" if self.failed or not self.done_received else "本轮没有生成可展示的正文。"
         self.state.step(self.state.terminal)

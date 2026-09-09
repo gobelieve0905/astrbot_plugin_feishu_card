@@ -41,6 +41,9 @@ class FakeEvent:
         self.extras = {}
         self.session = SimpleNamespace(session_id='test-session')
 
+    def is_stopped(self):
+        return False
+
     def get_extra(self, key):
         return self.extras.get(key)
 
@@ -49,6 +52,9 @@ class FakeEvent:
 
     def get_platform_id(self):
         return 'test-platform'
+
+    def get_group_id(self):
+        return getattr(self, "group_id", "")
 
     def get_self_id(self):
         return "test-bot"
@@ -281,6 +287,90 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         plugin.ensure = ensure
         result = await plugin.card_render(event, '{bad json', 'fallback')
         self.assertIn('未完成更新', result)
+
+    async def test_stop_callback_cancels_host_work_and_preserves_partial_answer(self):
+        from lark_oapi import EventDispatcherHandler
+        from lark_oapi.event.callback.model.p2_card_action_trigger import P2CardActionTrigger
+        from astrbot.core.agent.runners.tool_loop_agent_runner import ToolLoopAgentRunner
+        from astrbot.core.astr_agent_run_util import _watch_agent_stop_signal
+        from types import MethodType
+        interactions = importlib.import_module(package + '.interactions')
+        platform = SimpleNamespace(connection_mode='socket', event_handler=EventDispatcherHandler.builder('', '').build(),
+            meta=lambda: SimpleNamespace(id='test-platform'))
+        self.plugin.context = SimpleNamespace(platform_manager=SimpleNamespace(get_insts=lambda: [platform]))
+        manager = interactions.Interactions(self.plugin)
+        self.plugin.interactions = manager
+        try:
+            event, session = await self.new_session()
+            session.state.text = 'partial answer'
+            value = session.state.stop_value
+            def payload(user):
+                return P2CardActionTrigger({'event': {'operator': {'open_id': user}, 'action': {'value': value}}})
+            self.assertIn('发起人', manager.receive(platform, payload('someone-else')).toast.content)
+            self.assertFalse(session.stop_requested)
+            runner = SimpleNamespace(_abort_signal=asyncio.Event(), done=lambda: False)
+            runner.request_stop = MethodType(ToolLoopAgentRunner.request_stop, runner)
+            cancelled = asyncio.Event()
+            started = asyncio.Event()
+            async def pending_work():
+                started.set()
+                try:
+                    await asyncio.Event().wait()
+                finally:
+                    cancelled.set()
+            work = asyncio.create_task(ToolLoopAgentRunner._await_or_stop(runner, pending_work()))
+            await started.wait()
+            self.assertIn('已请求终止', manager.receive(platform, payload('test-user')).toast.content)
+            self.assertIn('正在终止', manager.receive(platform, payload('test-user')).toast.content)
+            await asyncio.wait_for(_watch_agent_stop_signal(runner, event), 1)
+            await asyncio.wait_for(work, 1)
+            self.assertTrue(cancelled.is_set())
+            session.final_text = 'late final answer'
+            async def stream():
+                yield MessageChain().message('late chunk')
+                yield MessageChain(type='aborted')
+            await session.stream(stream())
+            self.assertEqual(session.state.text, 'partial answer')
+            self.assertEqual(session.state.terminal, '已终止')
+            self.assertEqual(len(event.sent), 1)
+            self.assertFalse(manager.stops)
+            self.assertNotIn('stop_answer', str(session.transport.bodies[-1]))
+        finally:
+            manager.close()
+
+    async def test_group_stop_permission_configuration(self):
+        from lark_oapi import EventDispatcherHandler
+        from lark_oapi.event.callback.model.p2_card_action_trigger import P2CardActionTrigger
+        interactions = importlib.import_module(package + '.interactions')
+        platform = SimpleNamespace(connection_mode='socket', event_handler=EventDispatcherHandler.builder('', '').build(),
+            meta=lambda: SimpleNamespace(id='test-platform'))
+        self.plugin.context = SimpleNamespace(platform_manager=SimpleNamespace(get_insts=lambda: [platform]))
+        manager = interactions.Interactions(self.plugin)
+        self.plugin.interactions = manager
+        try:
+            event, session = await self.new_session()
+            event.group_id = 'test-group'
+            value = session.state.stop_value
+            def click(user, chat='test-group', callback=value):
+                return manager.receive(platform, P2CardActionTrigger({'event': {
+                    'operator': {'open_id': user}, 'context': {'open_chat_id': chat}, 'action': {'value': callback}}}))
+            self.assertIn('发起人', click('other-member').toast.content)
+            self.plugin.config['group_stop_initiator_only'] = False
+            self.assertIn('发起人', click('other-member', 'other-group').toast.content)
+            self.assertIn('发起人', click('other-member', None).toast.content)
+            event.group_id = ''
+            self.assertIn('发起人', click('other-member').toast.content)
+            self.assertFalse(session.stop_requested)
+            event.group_id = 'test-group'
+            # Allowing group stops must not grant access to form/continuation actions.
+            manager.bindings['form-test'] = {'session': session, 'platform': platform, 'expires': float('inf'), 'actions': [{}]}
+            self.assertIn('发起人', click('other-member', callback={'feishu_card_binding': 'form-test', 'slot': 0}).toast.content)
+            self.assertIn('已请求终止', click('other-member').toast.content)
+            self.assertTrue(session.stop_requested)
+            self.assertTrue(event.get_extra('agent_stop_requested'))
+            await session.finish()
+        finally:
+            manager.close()
 
     async def test_observer_restore(self):
         from astrbot.core.agent.runners.tool_loop_agent_runner import ToolLoopAgentRunner

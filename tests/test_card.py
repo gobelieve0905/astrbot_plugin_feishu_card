@@ -70,6 +70,21 @@ class CardTests(unittest.TestCase):
         self.assertTrue(content.startswith('```python\n'))
         self.assertTrue(content.rstrip().endswith('```'))
 
+    def test_stop_button_running_stopping_and_terminal(self):
+        state = card.State(stop_value={'feishu_card_binding': 'test'})
+        for native in (None, {'schema': '2.0', 'body': {'elements': []}}):
+            state.rich_card = native
+            state.terminal = ''
+            state.stopping = False
+            body = card.render(state, {}, 'partial')['body']['elements']
+            button = next(e for e in body if e.get('element_id') == 'stop_answer')
+            self.assertFalse(button['disabled'])
+            state.stopping = True
+            body = card.render(state, {}, 'partial')['body']['elements']
+            self.assertTrue(next(e for e in body if e.get('element_id') == 'stop_answer')['disabled'])
+            state.terminal = '已终止'
+            self.assertNotIn('stop_answer', str(card.render(state, {}, 'partial')))
+
     def test_long_unicode_lossless(self):
         text = ('中文段落🐈\n' * 9000) + 'final'
         parts = card.pages(text)

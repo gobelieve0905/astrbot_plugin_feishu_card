@@ -1,7 +1,7 @@
 name: astrbot_plugin_feishu_agent_card
 display_name: 飞书 Agent 卡片
 desc: 为飞书 Agent 回复提供即时反馈、同卡更新、折叠过程、工具与来源、真实用量及失败终态。
-version: 0.2.1
+version: 0.2.3
 author: Kingboat
 astrbot_version: '>=4.28.0,<4.28.1'
 support_platforms:
