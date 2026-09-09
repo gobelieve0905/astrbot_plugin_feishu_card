@@ -11,6 +11,11 @@ sys.modules[spec.name] = card
 spec.loader.exec_module(card)
 
 
+rich_spec = importlib.util.spec_from_file_location('rich_under_test', Path(__file__).parents[1] / 'rich.py')
+rich = importlib.util.module_from_spec(rich_spec)
+rich_spec.loader.exec_module(rich)
+
+
 class CardTests(unittest.TestCase):
     def test_visual_hierarchy(self):
         state = card.State(question='question', text='answer')
@@ -84,6 +89,47 @@ class CardTests(unittest.TestCase):
             self.assertTrue(next(e for e in body if e.get('element_id') == 'stop_answer')['disabled'])
             state.terminal = '已终止'
             self.assertNotIn('stop_answer', str(card.render(state, {}, 'partial')))
+
+    def test_long_table_keeps_all_values_in_full_width_details(self):
+        name = 'Example_Identifier_With_Multiple_Segments_And_Unique_Suffix_123456789'
+        source = {'schema': '2.0', 'body': {'elements': [{'tag': 'table', 'row_height': 'low',
+            'columns': [{'name': 'name', 'display_name': 'Name', 'data_type': 'text'},
+                        {'name': 'value', 'display_name': 'Value', 'data_type': 'number'}],
+            'rows': [{'name': name, 'value': 123.456}, {'name': 'short', 'value': 0}]}]}}
+        prepared = rich.parse_card(json.dumps(source))
+        table, details = prepared['body']['elements']
+        self.assertEqual(table['rows'], source['body']['elements'][0]['rows'])
+        self.assertEqual(table['row_height'], 'auto')
+        self.assertEqual([c['width'] for c in table['columns']], ['70%', '30%'])
+        text = str(details)
+        self.assertIn(rich.escaped_cell(name), details['elements'][0]['content'])
+        self.assertIn('123.456', text)
+        self.assertIn('short', text)
+        self.assertIn('0', details['elements'][1]['content'])
+        state = card.State(rich_card=prepared)
+        state.narratives = ['metadata ' * 4000]
+        rendered = card.render(state, {}, 'fallback')
+        self.assertEqual(rendered['body']['elements'][1], details)
+
+    def test_wide_nested_tables_and_short_tables(self):
+        table = {'tag': 'table', 'columns': [{'name': str(i), 'width': '100px'} for i in range(5)],
+                 'rows': [{str(i): i for i in range(5)}]}
+        source = {'schema': '2.0', 'body': {'elements': [{'tag': 'column_set', 'columns': [
+            {'tag': 'column', 'elements': [table]}]}]}}
+        result = rich.parse_card(json.dumps(source))
+        elements = result['body']['elements'][0]['columns'][0]['elements']
+        self.assertEqual(len(elements), 2)
+        self.assertEqual(elements[0]['rows'], table['rows'])
+        self.assertTrue(all(c['width'] == '100px' for c in elements[0]['columns']))
+        result = rich.parse_card(json.dumps(rich.RECIPES['table']))
+        self.assertEqual(len(result['body']['elements']), 1)
+
+    def test_expanded_table_budget_fails_without_dropping_values(self):
+        source = {'schema': '2.0', 'body': {'elements': [{'tag': 'table',
+            'columns': [{'name': 'name'}], 'rows': [{'name': 'x' * 8000}, {'name': 'y' * 8000}]}]}}
+        with self.assertRaisesRegex(ValueError, 'ALL original values'):
+            rich.parse_card(json.dumps(source))
+        self.assertEqual(len(source['body']['elements'][0]['rows']), 2)
 
     def test_long_unicode_lossless(self):
         text = ('中文段落🐈\n' * 9000) + 'final'
