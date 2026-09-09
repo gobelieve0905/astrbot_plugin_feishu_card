@@ -79,7 +79,8 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
             yield MessageChain().message('world')
             session.done_received = True
         await event.send_streaming(stream())
-        self.assertEqual(session.state.text, 'hello\n\nworld')
+        self.assertEqual(session.state.text, 'world')
+        self.assertEqual(session.state.narratives, ['hello'])
         self.assertEqual(len(event.sent), 1)
         self.assertEqual(event.native, [])
         self.assertEqual(session.state.terminal, '已完成')
@@ -168,6 +169,27 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
             yield MessageChain().message('partial without host terminal')
         await event.send_streaming(stream())
         self.assertEqual(session.state.terminal, '本轮未完成')
+
+    async def test_tool_status_does_not_enter_answer(self):
+        event, session = await self.new_session()
+        await event.send(MessageChain(type='tool_call').message('host tool status'))
+        await event.send(MessageChain(type='tool_call_result').message('raw tool result'))
+        self.assertEqual(session.state.text, '')
+        session.done_received = True
+        await event.send(MessageChain().message('final answer'))
+        self.assertEqual(session.state.text, 'final answer')
+
+    async def test_authoritative_final_replaces_interim_text(self):
+        event, session = await self.new_session()
+        async def stream():
+            yield MessageChain().message('public plan')
+            session.archive_progress()  # Tool hook works even with show_tool_use off.
+            yield MessageChain().message('partial final')
+            session.final_text = 'complete final answer'
+            session.done_received = True
+        await event.send_streaming(stream())
+        self.assertEqual(session.state.text, 'complete final answer')
+        self.assertEqual(session.state.narratives, ['public plan'])
 
     async def test_observer_restore(self):
         from astrbot.core.agent.runners.tool_loop_agent_runner import ToolLoopAgentRunner

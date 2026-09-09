@@ -58,8 +58,13 @@ def pages(text, limit=10000):
 
 def panel(title, text, expanded=False):
     return {"tag": "collapsible_panel", "expanded": expanded,
-            "header": {"title": {"tag": "plain_text", "content": title}},
-            "elements": [{"tag": "markdown", "content": text}]}
+            "background_color": "grey", "padding": "8px 12px 8px 12px",
+            "border": {"color": "grey", "corner_radius": "6px"},
+            "header": {"title": {"tag": "plain_text", "content": title},
+                       "icon": {"tag": "standard_icon", "token": "down-small-ccm_outlined", "size": "16px 16px"},
+                       "icon_position": "follow_text", "icon_expanded_angle": -180},
+            "elements": [{"tag": "markdown", "content": text,
+                          "text_size": "notation", "text_color": "grey"}]}
 
 
 @dataclass
@@ -71,6 +76,7 @@ class State:
     terminal: str = ""
     ended: float = 0
     steps: list = field(default_factory=list)
+    narratives: list = field(default_factory=list)
     tools: list = field(default_factory=list)
     sources: list = field(default_factory=list)
     models: list = field(default_factory=list)
@@ -110,15 +116,27 @@ class State:
 
 
 def render(state, config, part="", page=0, count=1, historical=False):
-    md = lambda text: {"tag": "markdown", "content": text}
+    def md(text, *, secondary=False):
+        element = {"tag": "markdown", "content": text, "text_size": "notation" if secondary else "normal"}
+        if secondary:
+            element["text_color"] = "grey"
+        return element
     elapsed = int((state.ended or time.monotonic()) - state.start)
     status = state.terminal or state.status
     elements = []
     if config.get("show_question", True) and state.question:
-        elements.append(md("> " + label(state.question, 240)))
-    if config.get("show_process", True) and state.steps:
-        elements.append(panel("处理过程", "\n".join(f"{t}s · {s}" for t, s in state.steps), config.get("expand_process", False)))
-    elements.append(md(part or ("本页内容已输出。" if historical else "已收到，正在处理你的请求…")))
+        elements.append(md("> " + label(state.question, 240), secondary=True))
+    if config.get("show_process", True) and (state.steps or state.narratives):
+        process = "\n\n".join(state.narratives)
+        timeline = "\n".join(f"{t}s · {s}" for t, s in state.steps)
+        elements.append(panel("处理过程", "\n\n".join(x for x in (process, timeline) if x), config.get("expand_process", False)))
+    elements.append({"tag": "hr"})
+    elements.append(md("**回答**" if part else "**正在处理**"))
+    answer = md(part or ("本页内容已输出。" if historical else "已收到，正在处理你的请求…"))
+    answer["element_id"] = "answer_body"
+    answer["margin"] = "8px 0px 16px 0px"
+    elements.append(answer)
+    elements.append({"tag": "hr"})
     if config.get("show_tools", True) and state.tools:
         lines = []
         for tool in state.tools[-16:]:
@@ -149,8 +167,8 @@ def render(state, config, part="", page=0, count=1, historical=False):
     footer.extend([f"{elapsed}s", status])
     if count > 1:
         footer.append(f"第 {page + 1}/{count} 页")
-    elements.append(md(" · ".join(footer)))
-    elements.append(md("你可以继续发送消息。"))
+    elements.append(md(" · ".join(footer), secondary=True))
+    elements.append(md("你可以继续发送消息。", secondary=True))
     body = {"schema": "2.0", "config": {"wide_screen_mode": True, "update_multi": True,
             "summary": {"content": f"{status} · 飞书 Agent 卡片"}}, "body": {"elements": elements}}
     # Keep answer text lossless. Trim only optional display rows at whole-line boundaries.

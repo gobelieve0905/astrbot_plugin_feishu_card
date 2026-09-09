@@ -1,4 +1,4 @@
-"""Installable AstrBot Star: Feishu Agent Card, preview 0.1.0."""
+"""Installable AstrBot Star: Feishu Agent Card, preview 0.1.1."""
 import asyncio
 import json
 import os
@@ -37,7 +37,7 @@ class FeishuAgentCard(Star):
         try:
             self.observer.install()
             self.enabled = True
-            self.logger.info("Feishu Agent Card 0.1.0 ready (AstrBot 4.28.0)")
+            self.logger.info("Feishu Agent Card 0.1.1 ready (AstrBot 4.28.0)")
         except Exception as exc:
             self.logger.warning("Feishu Agent Card disabled: %s", str(exc))
 
@@ -134,6 +134,7 @@ class FeishuAgentCard(Star):
         session = event.get_extra(KEY)
         if not session or session.closed:
             return
+        session.archive_progress()
         name = label(tool.name, 80)
         session.state.tools.append({"name": name, "start": time.monotonic(), "status": "执行中"})
         session.state.step(f"正在调用工具：{name}")
@@ -173,6 +174,7 @@ class FeishuAgentCard(Star):
         if not session or session.closed:
             return
         session.done_received = True
+        session.final_text = getattr(resp, "completion_text", None)
         session.failed = getattr(resp, "role", "") == "err"
         if session.failed:
             session.state.terminal = "本轮未完成"

@@ -7,7 +7,7 @@ from types import MethodType
 from astrbot.api.event import MessageChain
 from astrbot.api.message_components import Plain, Json
 
-from .card import State, pages, render
+from .card import State, pages, render, safe_text
 from .transport import Transport
 
 
@@ -20,6 +20,7 @@ class Session:
         self.closed = False
         self.stream_active = False
         self.done_received = False
+        self.final_text = None
         self.failed = False
         self.delivery_failed = False
         self.task = None
@@ -68,8 +69,10 @@ class Session:
     async def flush(self):
         async with self.lock:
             parts = pages(self.state.text)
+            visible_count = len(parts)
+            parts.extend(["过程内容已收起，完整回答请查看前面的回答页。"] * max(0, len(self.cards) - len(parts)))
             for index, part in enumerate(parts):
-                if not self.state.terminal and index < len(parts) - 1 and index < len(self.sent_bodies) and self.sent_bodies[index]:
+                if not self.state.terminal and index < visible_count - 1 and index < len(self.sent_bodies) and self.sent_bodies[index]:
                     continue
                 body = render(self.state, self.plugin.config, part, index, len(parts), index < len(parts) - 1)
                 encoded = json.dumps(body, ensure_ascii=False)
@@ -90,12 +93,23 @@ class Session:
                     self.plugin.remember(self, self.cards[index], self.sequences[index])
                     self.sent_bodies[index] = encoded
 
+    def archive_progress(self):
+        """A host tool boundary identifies public interim text, without keyword parsing."""
+        text = self.state.text.strip()
+        if text:
+            self.state.narratives.append(safe_text(text, 2400))
+            self.state.narratives = self.state.narratives[-6:]
+            self.state.text = ""
+
     async def send(self, chain):
         if self.closed:
             # Restored after normal completion; an already captured caller still delegates.
             return await self.original_send(chain)
-        if getattr(chain, "type", "") == "reasoning":
+        kind = getattr(chain, "type", "")
+        if kind in {"reasoning", "tool_call", "tool_call_result"}:
             return
+        if kind == "tool_direct_result":
+            return await self.original_send(chain)
         texts, rest = [], []
         for component in chain.chain:
             if isinstance(component, Plain):
@@ -131,11 +145,10 @@ class Session:
                 if kind == "aborted":
                     self.state.terminal = "已取消 / 已中断"
                     continue
-                if kind in {"reasoning", "agent_stats"}:
+                if kind in {"reasoning", "agent_stats", "tool_call", "tool_call_result"}:
                     continue
                 if kind == "break":
-                    if self.state.text and not self.state.text.endswith("\n\n"):
-                        self.state.text += "\n\n"
+                    self.archive_progress()
                     continue
                 rest = []
                 for component in chain.chain:
@@ -167,6 +180,8 @@ class Session:
         if self.task:
             self.task.cancel()
             await asyncio.gather(self.task, return_exceptions=True)
+        if not self.failed and self.final_text:
+            self.state.text = self.final_text
         self.state.ended = time.monotonic()
         self.state.terminal = status or self.state.terminal or ("本轮未完成" if self.failed or not self.done_received else "已完成")
         if not self.state.text.strip():

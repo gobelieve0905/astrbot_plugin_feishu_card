@@ -12,6 +12,24 @@ spec.loader.exec_module(card)
 
 
 class CardTests(unittest.TestCase):
+    def test_visual_hierarchy(self):
+        state = card.State(question='question', text='answer')
+        state.step('preparing')
+        state.narratives.append('public plan')
+        body = card.render(state, {}, state.text)
+        elements = body['body']['elements']
+        answer = next(e for e in elements if e.get('element_id') == 'answer_body')
+        self.assertEqual(answer['text_size'], 'normal')
+        self.assertEqual(answer['content'], 'answer')
+        for e in elements[-2:]:
+            self.assertEqual(e['text_size'], 'notation')
+            self.assertEqual(e['text_color'], 'grey')
+        process = next(e for e in elements if e['tag'] == 'collapsible_panel')
+        self.assertEqual(process['background_color'], 'grey')
+        self.assertIn('public plan', process['elements'][0]['content'])
+        self.assertIn('icon', process['header'])
+        self.assertEqual(sum(e['tag'] == 'hr' for e in elements), 2)
+
     def test_long_unicode_lossless(self):
         text = ('中文段落🐈\n' * 9000) + 'final'
         parts = card.pages(text)
