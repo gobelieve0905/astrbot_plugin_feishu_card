@@ -1,0 +1,1 @@
+# Reuses AstrBot 4.28.0 and its bundled lark-oapi. No additional dependency.

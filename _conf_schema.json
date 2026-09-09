@@ -1,0 +1,15 @@
+{
+  "enabled": {"description": "启用飞书 Agent 卡片", "type": "bool", "default": true},
+  "platform_ids": {"description": "生效的飞书实例 ID（空列表代表全部飞书实例）", "type": "list", "default": []},
+  "enable_private": {"description": "私聊生效", "type": "bool", "default": true},
+  "enable_group": {"description": "群聊生效（沿用宿主唤醒与权限规则）", "type": "bool", "default": true},
+  "show_question": {"description": "显示问题摘要", "type": "bool", "default": true},
+  "show_process": {"description": "显示折叠处理过程", "type": "bool", "default": true},
+  "expand_process": {"description": "默认展开处理过程", "type": "bool", "default": false},
+  "show_tools": {"description": "显示工具调用摘要", "type": "bool", "default": true},
+  "show_sources": {"description": "显示知识与数据来源", "type": "bool", "default": true},
+  "show_usage": {"description": "显示模型与用量", "type": "bool", "default": true},
+  "update_interval": {"description": "卡片更新间隔（秒，限制在 1–10 秒）", "type": "float", "default": 1.5},
+  "price_currency": {"description": "估算价格币种", "type": "string", "default": "USD"},
+  "model_prices_json": {"description": "可选模型价格 JSON：以实际模型标识为键，每百万 Token 的 input/cached_input/output 单价；留空不显示费用", "type": "text", "default": "{}"}
+}
