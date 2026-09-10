@@ -122,25 +122,19 @@ class CardTests(unittest.TestCase):
         self.assertEqual(parsed['body']['elements'][0]['rows'], source['body']['elements'][0]['rows'])
         self.assertEqual(len(parsed['body']['elements']), 1)
 
-    def test_download_preserves_answer_tables_and_strips_callbacks(self):
-        import io, zipfile, csv
+    def test_markdown_download_keeps_code_and_all_native_rows(self):
         text = '## Test\n```python\nprint("test")\n```\n' + '完整' * 20000
-        native = {'schema': '2.0', 'body': {'elements': [
-            {'tag': 'table', 'columns': [{'name': 'n'}, {'name': 'v'}],
-             'rows': [{'n': 'long_' * 100, 'v': 0}, {'n': 'comma,new\nline', 'v': 1.23}]},
-            {'tag': 'button', 'behaviors': [{'type': 'callback', 'value': {'feishu_card_binding': 'PRIVATE_BINDING'}}]}]}}
+        native = {'body': {'elements': [{'tag': 'table', 'columns': [{'name': 'n'}, {'name': 'v'}],
+            'rows': [{'n': 'long_' * 100, 'v': 0}, {'n': 'pipe|line', 'v': 1.23}]}]}}
         state = card.State(text=text, rich_card=native, terminal='已终止')
-        state.narratives = ['NOT_ANSWER']
-        with zipfile.ZipFile(io.BytesIO(rich.reply_archive(state))) as z:
-            self.assertEqual(z.read('reply.md').decode(), text)
-            raw = z.read('card.json').decode()
-            self.assertNotIn('PRIVATE_BINDING', raw)
-            self.assertNotIn('NOT_ANSWER', raw)
-            self.assertEqual(json.loads(raw)['body']['elements'][0]['rows'], native['body']['elements'][0]['rows'])
-            rows = list(csv.reader(io.StringIO(z.read('tables/table-1.csv').decode('utf-8-sig'))))
-            self.assertEqual(rows[1], ['long_' * 100, '0'])
-            self.assertEqual(rows[2], ['comma,new\nline', '1.23'])
-        self.assertIn('PRIVATE_BINDING', str(native))
+        result = rich.reply_markdown(state).decode()
+        self.assertIn(text, result)
+        self.assertIn('long_' * 100, result)
+        self.assertIn('pipe&#124;line | 1.23', result)
+        self.assertIn('已终止', result)
+        state.download_value = {'feishu_download': 'test'}
+        self.assertIn('download_reply', str(card.render(state, {}, text)))
+        self.assertNotIn('download_reply', str(card.render(state, {'enable_reply_download': False}, text)))
 
     def test_long_unicode_lossless(self):
         text = ('中文段落🐈\n' * 9000) + 'final'

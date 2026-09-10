@@ -46,18 +46,22 @@ class Transport:
             raise DeliveryError(f"image_upload:{resp.code}")
         return resp.data.image_key
 
-    async def reply_file(self, content, filename, message_id):
+    async def send_download(self, content, operator):
         from lark_oapi.api.im.v1 import (
-            CreateFileRequest, CreateFileRequestBody, ReplyMessageRequest, ReplyMessageRequestBody,
+            CreateFileRequest, CreateFileRequestBody,
         )
         req = CreateFileRequest.builder().request_body(CreateFileRequestBody.builder()
-            .file_type("stream").file_name(filename).file(io.BytesIO(content)).build()).build()
+            .file_type("stream").file_name("Agent回复.md").file(io.BytesIO(content)).build()).build()
         resp = await asyncio.wait_for(self.bot.im.v1.file.acreate(req), 30)
         if not resp.success() or not resp.data or not resp.data.file_key:
             raise DeliveryError(f"file_upload:{resp.code}")
-        req = ReplyMessageRequest.builder().message_id(message_id).request_body(
-            ReplyMessageRequestBody.builder().msg_type("file")
-            .content(json.dumps({"file_key": resp.data.file_key})).uuid(str(uuid.uuid4())).build()).build()
-        resp = await asyncio.wait_for(self.bot.im.v1.message.areply(req), 15)
+        await self.send_private(operator, "file", {"file_key": resp.data.file_key})
+
+    async def send_private(self, operator, msg_type, content):
+        from lark_oapi.api.im.v1 import CreateMessageRequest, CreateMessageRequestBody
+        req = CreateMessageRequest.builder().receive_id_type("open_id").request_body(
+            CreateMessageRequestBody.builder().receive_id(operator).msg_type(msg_type)
+            .content(json.dumps(content, ensure_ascii=False)).uuid(str(uuid.uuid4())).build()).build()
+        resp = await asyncio.wait_for(self.bot.im.v1.message.acreate(req), 15)
         if not resp.success():
-            raise DeliveryError(f"file_reply:{resp.code}")
+            raise DeliveryError(f"download_send:{resp.code}")

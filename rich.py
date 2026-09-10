@@ -1,9 +1,7 @@
 """Native card documents and component recipes; no business routing."""
 import copy
 import json
-import csv
-import io
-import zipfile
+import re
 import unicodedata
 
 DOCS = 'https://open.feishu.cn/document/feishu-cards/'
@@ -112,38 +110,30 @@ def expand_tables(node):
                 expand_tables(value)
 
 
-def reply_archive(state):
-    """Export only delivered answer data in memory; omit runtime callback capabilities."""
-    output = io.BytesIO()
-    native = copy.deepcopy(state.rich_card)
-    tables = []
-    def clean(node):
+def reply_markdown(state):
+    """One portable Markdown document; preserve full native table/chart data."""
+    sections = [state.text]
+    if state.terminal and state.terminal != '已完成':
+        sections.insert(0, '> 回复状态：' + state.terminal + '\n')
+    def cell(value):
+        return display_value(value).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('|', '&#124;').replace('\r\n', '\n').replace('\n', '<br>')
+    def walk(node):
         if isinstance(node, list):
-            for child in node:
-                clean(child)
+            for x in node: walk(x)
         elif isinstance(node, dict):
             if node.get('tag') == 'table':
-                tables.append(node)
-            if isinstance(node.get('behaviors'), list):
-                node['behaviors'] = [b for b in node['behaviors'] if b.get('type') != 'callback']
+                columns = node.get('columns', [])
+                if columns:
+                    lines = ['| ' + ' | '.join(cell(c.get('display_name', c.get('name', ''))) for c in columns) + ' |',
+                             '| ' + ' | '.join('---' for c in columns) + ' |']
+                    lines += ['| ' + ' | '.join(cell(row.get(c.get('name'), '')) for c in columns) + ' |' for row in node.get('rows', [])]
+                    sections.append('### 完整表格\n\n' + '\n'.join(lines))
+            elif node.get('tag') == 'chart':
+                data = json.dumps(node.get('chart_spec', {}), ensure_ascii=False, indent=2)
+                fence = '`' * max(3, max((len(x) for x in re.findall(r'`+', data)), default=0) + 1)
+                sections.append('### 图表数据\n\n' + fence + 'json\n' + data + '\n' + fence)
             for key, value in node.items():
-                if key not in ('rows', 'chart_spec'):
-                    clean(value)
-    clean(native)
-    with zipfile.ZipFile(output, 'w', zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr('reply.md', state.text)
-        archive.writestr('README.txt', '回复状态：' + state.terminal +
-            '\nreply.md 为完整正文或原生卡片文字兜底。card.json 保留原生组件数据（已移除交互回调）。'
-            '\n表格另存为 CSV，保留所有已提交行；图表数据在 card.json 中。图片为飞书资源引用，未打包图片二进制。'
-            '\n导出不含隐藏推理、工具原始参数、聊天历史或内部配置。\n')
-        if native:
-            archive.writestr('card.json', json.dumps(native, ensure_ascii=False, indent=2))
-        for i, table in enumerate(tables, 1):
-            csv_text = io.StringIO(newline='')
-            writer = csv.writer(csv_text)
-            columns = table.get('columns', [])
-            writer.writerow([c.get('display_name', c.get('name', '')) for c in columns])
-            for row in table.get('rows', []):
-                writer.writerow([display_value(row.get(c.get('name'), '')) for c in columns])
-            archive.writestr(f'tables/table-{i}.csv', csv_text.getvalue().encode('utf-8-sig'))
-    return output.getvalue()
+                if key not in ('rows', 'chart_spec', 'behaviors'):
+                    walk(value)
+    walk(state.rich_card)
+    return '\n\n'.join(sections).encode('utf-8')

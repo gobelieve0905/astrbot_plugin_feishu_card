@@ -102,32 +102,43 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         await session.start()
         return event, session
 
-    async def test_download_toggle_and_terminal_idempotence(self):
-        for enabled in (False, True):
-            self.plugin.config['enable_reply_download'] = enabled
-            event, session = await self.new_session()
-            session.done_received = True
-            session.final_text = 'full reply'
-            await session.finish()
-            await session.finish()
-            self.assertEqual(len(session.transport.files), int(enabled))
-            if enabled:
-                import io, zipfile
-                data, name, target = session.transport.files[0]
-                self.assertEqual(target, event.message_obj.message_id)
-                with zipfile.ZipFile(io.BytesIO(data)) as z:
-                    self.assertEqual(z.read('reply.md').decode(), 'full reply')
-                self.assertIn('ZIP', session.state.download_status)
-
-    async def test_download_failure_preserves_answer(self):
+    async def test_download_is_only_sent_on_viewer_click(self):
+        from unittest.mock import AsyncMock
+        from lark_oapi.event.callback.model.p2_card_action_trigger import P2CardActionTrigger
+        interactions = importlib.import_module(package + '.interactions')
+        manager = interactions.Interactions(self.plugin)
+        platform = SimpleNamespace(meta=lambda: SimpleNamespace(id='test-platform'))
+        manager.installed = [(platform, {}, None)]
+        manager.loop = asyncio.get_running_loop()
+        manager.install = lambda: None
+        self.plugin.interactions = manager
         event, session = await self.new_session()
-        session.transport.file_fail = True
+        session.transport.send_download = AsyncMock()
         session.done_received = True
-        session.final_text = 'answer survives'
+        session.final_text = 'full reply'
         await session.finish()
-        self.assertEqual(session.state.text, 'answer survives')
-        self.assertIn('附件发送失败', session.state.download_status)
-        self.assertNotIn(session, self.plugin.sessions)
+        session.transport.send_download.assert_not_awaited()
+        value = session.state.download_value
+        self.assertTrue(value)
+        def click(user):
+            return P2CardActionTrigger({'event': {'operator': {'open_id': user},
+                'context': {'open_chat_id': 'forwarded-chat'}, 'action': {'value': value}}})
+        self.assertIn('私聊', manager.receive(platform, click('other-viewer')).toast.content)
+        manager.receive(platform, click('other-viewer'))
+        await asyncio.gather(*list(manager.download_tasks))
+        session.transport.send_download.assert_awaited_once_with(b'full reply', 'other-viewer')
+        manager.receive(platform, click('another-viewer'))
+        await asyncio.gather(*list(manager.download_tasks))
+        self.assertEqual(session.transport.send_download.await_count, 2)
+        self.plugin.config['enable_reply_download'] = False
+        self.assertIn('关闭', manager.receive(platform, click('third-viewer')).toast.content)
+        event2, session2 = await self.new_session()
+        session2.done_received = True
+        await session2.finish()
+        self.assertIsNone(session2.state.download_value)
+        self.assertEqual(session.transport.files, [])
+        manager.close()
+        self.plugin.interactions = SimpleNamespace(release_stop=lambda s: None)
 
     async def test_first_card_before_model_and_single_delivery(self):
         event, session = await self.new_session()

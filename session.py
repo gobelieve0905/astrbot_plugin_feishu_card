@@ -9,7 +9,7 @@ from astrbot.api.message_components import Plain, Json
 
 from .card import State, pages, render, safe_text
 from .transport import Transport
-from .rich import reply_archive
+from .rich import reply_markdown
 
 
 class Session:
@@ -240,6 +240,13 @@ class Session:
         if not self.state.text.strip():
             self.state.text = "本轮未能生成回答，请稍后重试。" if self.failed or not self.done_received else "本轮没有生成可展示的正文。"
         self.state.step(self.state.terminal)
+        if self.plugin.config.get("enable_reply_download", True) and hasattr(self.plugin, 'interactions'):
+            try:
+                self.plugin.interactions.bind_download(self, reply_markdown(self.state))
+            except Exception as exc:
+                self.state.download_status = "下载按钮暂不可用。"
+                self.plugin.logger.warning("Download binding failed (%s)", type(exc).__name__)
+
         success = False
         try:
             for attempt in range(2):
@@ -255,18 +262,6 @@ class Session:
                     await self.original_send(MessageChain().message(f"{self.state.terminal}（卡片更新失败，正文补发）\n\n{part}"))
             if success:
                 self.plugin.forget(self.cards)
-            if self.plugin.config.get("enable_reply_download", True):
-                try:
-                    await self.transport.reply_file(reply_archive(self.state), "Agent回复.zip",
-                                                    self.event.message_obj.message_id)
-                    self.state.download_status = "完整回复已附为 ZIP 文件，可在本聊天下载。"
-                except Exception as exc:
-                    self.state.download_status = "回复附件发送失败，请检查应用文件上传与消息权限。"
-                    self.plugin.logger.warning("Reply download delivery failed (%s)", type(exc).__name__)
-                try:
-                    await self.flush()
-                except Exception as exc:
-                    self.plugin.logger.warning("Download status update failed (%s)", type(exc).__name__)
             self.event._has_send_oper = True
         finally:
             self.restore()

@@ -93,6 +93,7 @@ def panel(title, text, expanded=False):
 @dataclass
 class State:
     download_status: str = ""
+    download_value: dict | None = None
     question: str = ""
     rich_card: dict | None = None
     stop_value: dict | None = None
@@ -207,6 +208,10 @@ def render(state, config, part="", page=0, count=1, historical=False):
                          "text": {"tag": "plain_text", "content": "正在终止…" if state.stopping else "终止回答"},
                          "type": "danger", "disabled": state.stopping,
                          "behaviors": [{"type": "callback", "value": state.stop_value}]})
+    if state.terminal and state.download_value and config.get("enable_reply_download", True):
+        elements.append({"tag": "button", "element_id": "download_reply",
+                         "text": {"tag": "plain_text", "content": "下载回复 (.md)"},
+                         "type": "default", "behaviors": [{"type": "callback", "value": state.download_value}]})
     elements.append(md(" · ".join(footer), secondary=True))
     elements.append(md("你可以继续发送消息。" + (" " + state.download_status if state.download_status else ""), secondary=True))
     body = {"schema": "2.0", "config": {"wide_screen_mode": True, "update_multi": True,

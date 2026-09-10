@@ -15,6 +15,8 @@ class Interactions:
         self.plugin = plugin
         self.bindings = {}
         self.stops = {}
+        self.downloads = {}
+        self.download_tasks = set()
         self.installed = []
         self.loop = None
 
@@ -39,10 +41,61 @@ class Interactions:
     def close(self):
         for _, handlers, processor in self.installed:
             if handlers.get('p2.card.action.trigger') is processor:
-                handlers.pop('p2.card.action.trigger')
+                handlers.pop('p2.card.action.trigger', None)
         self.installed.clear()
         self.bindings.clear()
         self.stops.clear()
+        self.downloads.clear()
+        for task in self.download_tasks:
+            task.cancel()
+
+    def bind_download(self, session, content):
+        self.install()
+        platform = next((p for p, _, _ in self.installed if p.meta().id == session.event.get_platform_id()), None)
+        if platform is None:
+            raise ValueError('download callback unavailable')
+        now = time.monotonic()
+        self.downloads = {k: v for k, v in self.downloads.items() if v['expires'] > now}
+        if len(content) > 2_000_000:
+            raise ValueError('download too large')
+        while self.downloads and (len(self.downloads) >= 256 or sum(len(v['content']) for v in self.downloads.values()) + len(content) > 16_000_000):
+            self.downloads.pop(next(iter(self.downloads)))
+        token = secrets.token_urlsafe(24)
+        self.downloads[token] = {'platform': platform, 'transport': session.transport,
+                                 'content': content, 'expires': now + 86400, 'busy': set(), 'recent': {}}
+        session.state.download_value = {'feishu_download': token}
+
+    def download(self, platform, data, token):
+        record = self.downloads.get(token)
+        operator = data.operator.open_id
+        if not self.plugin.config.get('enable_reply_download', True):
+            return self.toast('下载功能已关闭。')
+        if not record or record['platform'] is not platform or record['expires'] <= time.monotonic() or not operator:
+            return self.toast('下载已过期，请重新生成回复。', 'error')
+        # Any authenticated viewer may download, including viewers of forwarded cards.
+        now = time.monotonic()
+        record['recent'] = {k: t for k, t in record['recent'].items() if now - t < 10}
+        if operator in record['busy'] or operator in record['recent']:
+            return self.toast('已收到下载请求，请稍候查看机器人私聊。')
+        if len(self.download_tasks) >= 16:
+            return self.toast('下载繁忙，请稍后重试。')
+        record['busy'].add(operator)
+        record['recent'][operator] = now
+        async def deliver():
+            try:
+                await record['transport'].send_download(record['content'], operator)
+            except Exception as exc:
+                self.plugin.logger.warning('Markdown download failed (%s)', type(exc).__name__)
+                try:
+                    await record['transport'].send_private(operator, 'text', {'text': '回复下载失败，请稍后重试或联系管理员检查文件上传与消息权限。'})
+                except Exception:
+                    self.plugin.logger.warning('Download failure notification unavailable')
+            finally:
+                record['busy'].discard(operator)
+        task = asyncio.create_task(deliver())
+        self.download_tasks.add(task)
+        task.add_done_callback(self.download_tasks.discard)
+        return self.toast('正在发送 .md 文件，请在机器人私聊中下载。', 'success')
 
     def bind_stop(self, session):
         self.install()
@@ -96,6 +149,8 @@ class Interactions:
                 return self.toast('交互服务暂不可用，请发送消息继续。', 'error')
             data = payload.event
             value = data.action.value or {}
+            if value.get('feishu_download'):
+                return self.download(platform, data, value['feishu_download'])
             token = value.get('feishu_card_binding')
             record = self.stops.get(token) or self.bindings.get(token)
             if not record or record['platform'] is not platform or record['expires'] <= time.monotonic():
