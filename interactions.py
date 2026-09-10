@@ -16,6 +16,11 @@ from lark_oapi.event.callback.model.p2_card_action_trigger import P2CardActionTr
 
 
 CONTINUATION_KEY = 'conversation_continuation_v1'
+INTERACTION_NOTICE = (
+    '使用说明：本卡片所有人合计仅可成功提交一次，同群成员不能各填一遍。'
+    '\n表单/按钮绑定仅保存在内存中，生成后 24 小时过期；插件重载或重启后立即失效。'
+    '\n按钮失效不会删除已有话题记录。若已启用支持引用续聊的话题功能，可引用原消息继续讨论；也可要求重新生成表单。'
+)
 
 
 def bind_delivery_anchor(event, origin_message_id):
@@ -190,6 +195,11 @@ class Interactions:
         origin_id = getattr(origin, '_feishu_card_origin_message_id', origin.message_obj.message_id)
         if not all(isinstance(v, str) and v for v in (chat, origin_id, origin.get_self_id(), origin.get_sender_id())):
             raise ValueError('Original chat/message/bot/user identity unavailable')
+        # Always visible, outside collapsed sections; applies to continuation controls only.
+        card['body']['elements'].append({'tag': 'markdown', 'content': INTERACTION_NOTICE,
+                                         'text_size': 'notation'})
+        if len(json.dumps(card, ensure_ascii=False).encode()) > 24000:
+            raise ValueError('Card including mandatory interaction notice exceeds 24 KB; simplify the layout without dropping user data.')
         self.bindings[token] = {'session': session, 'actions': actions, 'platform': platform, 'expires': now + 86400,
                                 'chat': chat, 'group': group, 'origin_message_id': origin_id,
                                 'self_id': origin.get_self_id(), 'sender': origin.get_sender_id(),

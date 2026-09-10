@@ -608,6 +608,34 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('p2.card.action.trigger', platform.event_handler._callback_processor_map)
         self.assertIn('过期', manager.receive(platform, self.continuation_payload(value)).toast.content)
 
+    async def test_interaction_notice_and_one_submission_across_members(self):
+        manager, platform, session, value = self.continuation_fixture()
+        rich = importlib.import_module(package + '.rich')
+        card_module = importlib.import_module(package + '.card')
+        interactions = importlib.import_module(package + '.interactions')
+        try:
+            self.plugin.config['group_continue_permission'] = 'members'
+            form = copy.deepcopy(rich.RECIPES['form'])
+            manager.bind(form, session)
+            notice = form['body']['elements'][-1]
+            self.assertEqual(notice['content'], interactions.INTERACTION_NOTICE)
+            state = card_module.State(rich_card=form, text='test', terminal='已完成')
+            rendered = card_module.render(state, {'show_process': False, 'show_sources': False}, 'test')
+            self.assertIn(notice, rendered['body']['elements'])
+            self.assertIn('24 小时', notice['content'])
+            self.assertIn('重载或重启', notice['content'])
+            self.assertIn('所有人合计', notice['content'])
+            form_value = form['body']['elements'][0]['elements'][1]['behaviors'][0]['value']
+            self.assertIn('已接收', manager.receive(platform, self.continuation_payload(form_value, operator='member-one')).toast.content)
+            self.assertIn('已处理', manager.receive(platform, self.continuation_payload(form_value, operator='member-two', event_id='second')).toast.content)
+            self.assertEqual(platform._event_queue.qsize(), 1)
+            plain = copy.deepcopy(rich.RECIPES['code'])
+            original = copy.deepcopy(plain)
+            self.assertIsNone(manager.bind(plain, session))
+            self.assertEqual(plain, original)
+        finally:
+            manager.close()
+
     async def test_observer_restore(self):
         from astrbot.core.agent.runners.tool_loop_agent_runner import ToolLoopAgentRunner
         original = ToolLoopAgentRunner._iter_llm_responses
