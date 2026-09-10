@@ -1,3 +1,14 @@
-AGENTS.md export-ignore
-MIGRATION.md export-ignore
-tests/ export-ignore
+# 开发资料保留在仓库，不进入 Git archive / GitHub 源码归档。
+/AGENTS.md export-ignore
+/docs export-ignore
+/tests export-ignore
+/RELEASING.md export-ignore
+/DEVELOPMENT.md export-ignore
+/CONTRIBUTING.md export-ignore
+/ARCHITECTURE.md export-ignore
+/ACCEPTANCE.md export-ignore
+/CONTINUATION*.md export-ignore
+/.github export-ignore
+/.gitignore export-ignore
+/.gitattributes export-ignore
+/MIGRATION.md export-ignore

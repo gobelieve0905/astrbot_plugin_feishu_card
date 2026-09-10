@@ -1,3 +1,9 @@
+# Unreleased
+
+- 安装包自动排除开发文档与协议说明，用户文档中的开发资料链接指向 GitHub。
+
+- 建立 main/develop 分支规范、候选验收与正式标签，以及 AstrBot Cloud 手动送审流程。
+
 # Changelog
 
 ## 0.2.9 — 2026-09-10
