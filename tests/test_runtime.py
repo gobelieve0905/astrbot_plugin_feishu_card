@@ -1,5 +1,6 @@
 """Run with the installed AstrBot venv. Network-free delivery/lifecycle regressions."""
 import asyncio
+import copy
 import importlib
 import itertools
 from pathlib import Path
@@ -43,6 +44,7 @@ class FakeEvent:
     bot = None
 
     def __init__(self):
+        self.message_obj = SimpleNamespace(message_id='test-only', raw_message=SimpleNamespace(chat_id='test-chat'))
         self.sent = []
         self.native = []
         self.extras = {}
@@ -300,12 +302,12 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
             token = manager.bind(card, session)
             value = card['body']['elements'][0]['behaviors'][0]['value']
             def payload(user):
-                return P2CardActionTrigger({'event': {'operator': {'open_id': user}, 'action': {'value': value, 'form_value': {'input': 'test'}}}})
+                return P2CardActionTrigger({'header': {'event_id': 'test-callback'}, 'event': {'context': {'open_chat_id': 'test-chat'}, 'operator': {'open_id': user}, 'action': {'value': value, 'form_value': {'input': 'test'}}}})
             self.assertIn('发起人', manager.receive(platform, payload('someone-else')).toast.content)
             self.assertIn('仍在处理', manager.receive(platform, payload('test-user')).toast.content)
             session.done_received = True
             await session.finish()
-            self.assertIn('已收到', manager.receive(platform, payload('test-user')).toast.content)
+            self.assertIn('已接收操作', manager.receive(platform, payload('test-user')).toast.content)
             self.assertEqual(len(queue), 1)
             manager.receive(platform, payload('test-user'))
             self.assertEqual(len(queue), 1)
@@ -350,7 +352,7 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
             session.state.text = 'partial answer'
             value = session.state.stop_value
             def payload(user):
-                return P2CardActionTrigger({'event': {'operator': {'open_id': user}, 'action': {'value': value}}})
+                return P2CardActionTrigger({'event': {'context': {'open_chat_id': 'test-chat'}, 'operator': {'open_id': user}, 'action': {'value': value}}})
             self.assertIn('发起人', manager.receive(platform, payload('someone-else')).toast.content)
             self.assertFalse(session.stop_requested)
             runner = SimpleNamespace(_abort_signal=asyncio.Event(), done=lambda: False)
@@ -395,6 +397,7 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         try:
             event, session = await self.new_session()
             event.group_id = 'test-group'
+            event.message_obj.raw_message.chat_id = 'test-group'
             value = session.state.stop_value
             def click(user, chat='test-group', callback=value):
                 return manager.receive(platform, P2CardActionTrigger({'event': {
@@ -408,7 +411,7 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(session.stop_requested)
             event.group_id = 'test-group'
             # Allowing group stops must not grant access to form/continuation actions.
-            manager.bindings['form-test'] = {'session': session, 'platform': platform, 'expires': float('inf'), 'actions': [{}]}
+            manager.bindings['form-test'] = {'session': session, 'platform': platform, 'expires': float('inf'), 'actions': [{}], 'chat': 'test-group', 'platform_id': 'test-platform', 'group': 'test-group', 'sender': 'test-user'}
             self.assertIn('发起人', click('other-member', callback={'feishu_card_binding': 'form-test', 'slot': 0}).toast.content)
             self.assertIn('已请求终止', click('other-member').toast.content)
             self.assertTrue(session.stop_requested)
@@ -416,6 +419,194 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
             await session.finish()
         finally:
             manager.close()
+
+    def continuation_fixture(self, group='group-one', origin='question-one'):
+        from astrbot.core.platform.sources.lark.lark_adapter import LarkPlatformAdapter
+        from astrbot.core.platform.astrbot_message import AstrBotMessage, MessageMember
+        from astrbot.core.platform.message_type import MessageType
+        from lark_oapi import EventDispatcherHandler
+        from types import MethodType
+        interactions = importlib.import_module(package + '.interactions')
+        platform = SimpleNamespace(connection_mode='socket', appid='test-app', bot_open_id='test-bot',
+            lark_api=None, _event_queue=asyncio.Queue(),
+            event_handler=EventDispatcherHandler.builder('', '').build(),
+            meta=lambda: SimpleNamespace(id='test-platform', name='lark'))
+        platform.create_event = MethodType(LarkPlatformAdapter.create_event, platform)
+        platform.commit_event = MethodType(LarkPlatformAdapter.commit_event, platform)
+        msg = AstrBotMessage()
+        msg.type = MessageType.GROUP_MESSAGE if group else MessageType.FRIEND_MESSAGE
+        msg.group_id = group
+        msg.sender = MessageMember('owner', 'original nickname')
+        msg.self_id = 'test-bot'
+        msg.session_id = group or 'owner'
+        msg.message_id = origin
+        msg.message_str = 'original question'
+        msg.message = []
+        msg.raw_message = SimpleNamespace(chat_id=group or 'private-chat')
+        event = platform.create_event(msg)
+        # Emulate another plugin having routed the original event. Do not copy this routing.
+        event.session.session_id = 'a-topic-modified-session'
+        event.role = 'admin'
+        session = SimpleNamespace(event=event, closed=True)
+        self.plugin.context = SimpleNamespace(platform_manager=SimpleNamespace(get_insts=lambda: [platform]))
+        manager = interactions.Interactions(self.plugin)
+        card = {'schema': '2.0', 'body': {'elements': [{'tag': 'button', 'behaviors': [
+            {'type': 'callback', 'value': {'action': 'continue', 'origin_message_id': 'forged'}}]}]}}
+        token = manager.bind(card, session)
+        return manager, platform, session, {'feishu_card_binding': token, 'slot': 0}
+
+    def continuation_payload(self, value, event_id='callback-one', operator='owner', chat='group-one', **form):
+        from lark_oapi.event.callback.model.p2_card_action_trigger import P2CardActionTrigger
+        return P2CardActionTrigger({'header': {'event_id': event_id, 'app_id': 'test-app'}, 'event': {
+            'operator': {'open_id': operator}, 'context': {'open_chat_id': chat},
+            'action': {'value': value, 'form_value': form}}})
+
+    async def test_continuation_standard_queue_identity_and_contract(self):
+        manager, platform, session, value = self.continuation_fixture()
+        try:
+            self.plugin.config['group_continue_permission'] = 'members'
+            value.update(event_id='forged', origin_message_id='forged', chat_id='evil', sender='owner')
+            payload = self.continuation_payload(value, operator='member-two',
+                conversation_continuation_v1={'version': 99, 'origin_message_id': 'evil'}, session_id='evil')
+            response = manager.receive(platform, payload)
+            self.assertIn('已接收操作', response.toast.content)
+            self.assertNotIn('恢复', response.toast.content)
+            event = platform._event_queue.get_nowait()
+            self.assertNotEqual(event.message_obj.message_id, 'question-one')
+            self.assertTrue(event.message_obj.message_id.startswith('card_interaction_'))
+            self.assertEqual(event.message_obj.raw_message.message_id, event.message_obj.message_id)
+            self.assertEqual(event.get_extra('conversation_continuation_v1'), {
+                'version': 1, 'source': 'card_interaction', 'event_id': event.message_obj.message_id,
+                'origin_message_id': 'question-one'})
+            self.assertEqual(event.get_sender_id(), 'member-two')
+            self.assertEqual(event.get_sender_name(), 'member-two')
+            self.assertEqual(event.get_self_id(), 'test-bot')
+            self.assertEqual(event.get_group_id(), 'group-one')
+            self.assertEqual(event.session.session_id, 'group-one')
+            self.assertEqual(event.role, 'member')
+            self.assertFalse(event.is_wake)
+            self.assertEqual(event.message_obj.raw_message.chat_id, 'group-one')
+            self.assertIsNone(event.message_obj.raw_message.parent_id)
+            self.assertIn('已接收操作', manager.receive(platform, payload).toast.content)
+            self.assertTrue(platform._event_queue.empty())
+            self.assertIn('已处理', manager.receive(platform, self.continuation_payload(value, event_id='different')).toast.content)
+            self.assertTrue(platform._event_queue.empty())
+        finally:
+            manager.close()
+
+    async def test_continuation_permissions_private_and_cross_chat(self):
+        for group in ('group-one', ''):
+            manager, platform, session, value = self.continuation_fixture(group)
+            chat = group or 'private-chat'
+            try:
+                self.plugin.config['group_continue_permission'] = 'initiator'
+                self.plugin.config['group_stop_initiator_only'] = False
+                self.assertIn('发起人', manager.receive(platform, self.continuation_payload(value, operator='other', chat=chat)).toast.content)
+                self.plugin.config['group_continue_permission'] = 'members'
+                for wrong_chat in ('another-chat', None):
+                    self.assertIn('原对话', manager.receive(platform, self.continuation_payload(value, chat=wrong_chat)).toast.content)
+                platform.bot_open_id = 'wrong-bot'
+                self.assertIn('机器人', manager.receive(platform, self.continuation_payload(value, chat=chat)).toast.content)
+                platform.bot_open_id = 'test-bot'
+                invalid = self.continuation_payload(value, chat=chat)
+                invalid.header.app_id = 'wrong-app'
+                self.assertIn('应用', manager.receive(platform, invalid).toast.content)
+                self.assertTrue(platform._event_queue.empty())
+                if not group:
+                    self.assertIn('发起人', manager.receive(platform, self.continuation_payload(value, operator='other', chat=chat)).toast.content)
+                self.assertIn('已接收', manager.receive(platform, self.continuation_payload(value, chat=chat)).toast.content)
+                event = platform._event_queue.get_nowait()
+                self.assertEqual(event.session.session_id, group or 'owner')
+                self.assertEqual(event.get_sender_id(), 'owner')
+            finally:
+                manager.close()
+
+    async def test_continuation_retry_queue_failure_ids_and_expiry(self):
+        manager, platform, session, value = self.continuation_fixture()
+        try:
+            invalid = self.continuation_payload(value, event_id=None)
+            self.assertIn('事件编号', manager.receive(platform, invalid).toast.content)
+            self.assertTrue(platform._event_queue.empty())
+            attempted = []
+            original_commit = platform.commit_event
+            def fail(event):
+                attempted.append(event.message_obj.message_id)
+                raise asyncio.QueueFull()
+            platform.commit_event = fail
+            payload = self.continuation_payload(value)
+            self.assertIn('失败', manager.receive(platform, payload).toast.content)
+            platform.commit_event = original_commit
+            manager.receive(platform, payload)
+            first = platform._event_queue.get_nowait()
+            self.assertEqual(first.message_obj.message_id, attempted[0])
+            # Different original card / genuine callback gets a distinct event ID.
+            from copy import deepcopy
+            rich = importlib.import_module(package + '.rich')
+            other_event = copy.copy(session.event)
+            other_event.message_obj = copy.deepcopy(session.event.message_obj)
+            other_event.message_obj.message_id = 'question-two'
+            other = SimpleNamespace(event=other_event, closed=True)
+            card = deepcopy(rich.RECIPES['button'])
+            manager.bind(card, other)
+            other_value = card['body']['elements'][0]['behaviors'][0]['value']
+            manager.receive(platform, self.continuation_payload(other_value, event_id='callback-two'))
+            second = platform._event_queue.get_nowait()
+            self.assertNotEqual(first.message_obj.message_id, second.message_obj.message_id)
+            self.assertEqual(second.get_extra('conversation_continuation_v1')['origin_message_id'], 'question-two')
+            self.assertEqual(first.get_extra('conversation_continuation_v1')['origin_message_id'], 'question-one')
+            manager.close()
+            self.assertIn('过期', manager.receive(platform, payload).toast.content)
+            self.assertTrue(platform._event_queue.empty())
+        finally:
+            manager.close()
+
+    async def test_continuation_delivery_preserves_synthetic_id_with_native_fallback(self):
+        from unittest.mock import AsyncMock, patch
+        from astrbot.core.platform.sources.lark.lark_event import LarkMessageEvent
+        manager, platform, session, value = self.continuation_fixture()
+        try:
+            manager.receive(platform, self.continuation_payload(value))
+            event = platform._event_queue.get_nowait()
+            new_id = event.message_obj.message_id
+            with patch.object(LarkMessageEvent, 'send_message_chain', new_callable=AsyncMock) as send_chain, \
+                 patch.object(LarkMessageEvent, '_send_im_message', new_callable=AsyncMock, return_value=True) as send_card:
+                await event.send(MessageChain().message('native fallback'))
+                self.assertEqual(send_chain.call_args.kwargs['reply_message_id'], 'question-one')
+                await event._send_card_message('card', reply_message_id=new_id)
+                self.assertEqual(send_card.call_args.kwargs['reply_message_id'], 'question-one')
+                self.assertEqual(event.message_obj.message_id, new_id)
+            # Session wrappers restore the delivery wrappers, not the broken synthetic reply ID.
+            resumed = session_module.Session(self.plugin, event)
+            with patch.object(LarkMessageEvent, '_send_im_message', new_callable=AsyncMock, return_value=True):
+                await resumed.start()
+                resumed.done_received = True
+                await resumed.finish()
+            with patch.object(LarkMessageEvent, 'send_message_chain', new_callable=AsyncMock) as send_chain:
+                await event.send(MessageChain().message('after restoration'))
+                self.assertEqual(send_chain.call_args.kwargs['reply_message_id'], 'question-one')
+            async def chunks():
+                yield MessageChain().message('native stream fallback')
+            with patch.object(LarkMessageEvent, '_create_streaming_card', new_callable=AsyncMock, return_value=None), \
+                 patch.object(LarkMessageEvent, 'send_message_chain', new_callable=AsyncMock) as send_chain:
+                await event.send_streaming(chunks())
+                self.assertEqual(send_chain.call_args.kwargs['reply_message_id'], 'question-one')
+            self.assertEqual(event.message_obj.message_id, new_id)
+        finally:
+            manager.close()
+
+    async def test_continuation_close_does_not_reinstall_during_finalization(self):
+        manager, platform, session, value = self.continuation_fixture()
+        manager.close()
+        manager.install()
+        self.assertNotIn('p2.card.action.trigger', platform.event_handler._callback_processor_map)
+        rich = importlib.import_module(package + '.rich')
+        with self.assertRaises(ValueError):
+            manager.bind(copy.deepcopy(rich.RECIPES['button']), session)
+        with self.assertRaises(ValueError):
+            manager.bind_download(session, b'test')
+        self.assertEqual(manager.bindings, {})
+        self.assertNotIn('p2.card.action.trigger', platform.event_handler._callback_processor_map)
+        self.assertIn('过期', manager.receive(platform, self.continuation_payload(value)).toast.content)
 
     async def test_observer_restore(self):
         from astrbot.core.agent.runners.tool_loop_agent_runner import ToolLoopAgentRunner

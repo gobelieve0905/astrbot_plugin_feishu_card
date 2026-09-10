@@ -44,7 +44,7 @@ def guide(component='all'):
                   'Choose table for exact comparisons, chart for trends, columns for side-by-side summaries.',
                   'Keep identifiers and names complete: never abbreviate or replace suffixes with ellipses. Tables use automatic row height; the plugin sets pixel column widths for native horizontal scrolling. Never duplicate tables as row-by-row detail panels.',
                   'Use feishu_card_upload_image for local generated image assets, then pass the returned img_key; never invent resource keys or business data.',
-                  'Callback behaviors use value.action to describe the requested continuation; plugin binds the operator and current conversation.',
+                  'Callback behaviors use value.action to describe the requested continuation; plugin validates original-chat permissions and submits continuation metadata through the native event queue; it does not restore topics itself.',
                   'After successful rendering, do not repeat the card in the final text. Supply a complete fallback_text.',
                   'For components absent from recipes, pass their documented native JSON; Feishu validates it. Correct errors returned by the tool.',
                   'Card limits, client versions, app permissions and callback subscription still apply.',

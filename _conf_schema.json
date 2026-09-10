@@ -82,5 +82,15 @@
     "type": "bool",
     "default": true,
     "hint": "开启后，回答结束时显示“下载回复 (.md)”按钮，不自动发送文件。任何看到卡片的人均可点击，文件发送至点击者的机器人私聊。按钮有效期 24 小时，插件重载后失效；需文件上传与消息权限。关闭后停止提供下载。"
+  },
+  "group_continue_permission": {
+    "description": "群聊继续操作权限",
+    "type": "string",
+    "default": "initiator",
+    "options": [
+      "initiator",
+      "members"
+    ],
+    "hint": "initiator：仅原发起人（默认）；members：同群成员。私聊始终仅原用户。只控制按钮/表单续聊，与终止回答权限及下载权限无关；仍经过 AstrBot 原生权限检查。"
   }
 }
