@@ -8,7 +8,8 @@
     "description": "生效的飞书实例",
     "type": "list",
     "default": [],
-    "hint": "留空表示所有飞书实例。填写 AstrBot 机器人配置中的实例 ID，可限制本插件生效范围。"
+    "hint": "从下拉框勾选已配置的飞书机器人实例，可多选；留空表示全部飞书实例。新增或删除机器人后，稍候重新打开配置窗口刷新选项。已有选择不会自动清除。",
+    "options": []
   },
   "enable_private": {
     "description": "私聊使用卡片",
@@ -32,7 +33,7 @@
     "description": "图片上传允许目录",
     "type": "list",
     "default": [],
-    "hint": "留空时允许 AstrBot 的 data/temp 和 data/plugin_data。自定义时每项填写一个机器人运行环境中的绝对目录路径，例如 /astrbot/data/temp；Docker 部署需填写容器内路径。自定义列表会替换默认目录。"
+    "hint": "限制插件可以读取并上传哪些服务器文件夹中的图片，不是飞书图片保存位置。一般留空即可：默认允许 AstrBot 的 data/temp 和 data/plugin_data。只有图片放在其他位置时才需要填写绝对目录，如 /astrbot/data/reports；Docker 使用容器内路径。自定义列表替换默认目录，需要保留默认目录时也请一并填写。"
   },
   "show_process": {
     "description": "显示折叠处理过程",

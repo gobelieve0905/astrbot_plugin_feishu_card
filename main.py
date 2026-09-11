@@ -21,6 +21,8 @@ class FeishuAgentCard(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
         self.config = dict(config)
+        self._dashboard_config = config
+        self._option_task = None
         try:
             self.config["model_prices"] = json.loads(config.get("model_prices_json", "{}"))
         except (ValueError, TypeError):
@@ -35,7 +37,29 @@ class FeishuAgentCard(Star):
         if self.ledger_path.exists():
             self.pending = json.loads(self.ledger_path.read_text())
 
+    def refresh_platform_options(self):
+        schema = getattr(self._dashboard_config, 'schema', None)
+        if not isinstance(schema, dict) or 'platform_ids' not in schema:
+            return
+        platforms = self.context.get_config().get('platform', [])
+        options = {p['id'] for p in platforms if isinstance(p, dict) and p.get('type') == 'lark'
+                   and isinstance(p.get('id'), str) and p['id']}
+        # Keep stale selected IDs visible, never silently broaden scope by clearing them.
+        selected = self._dashboard_config.get('platform_ids', [])
+        if isinstance(selected, list):
+            options.update(x for x in selected if isinstance(x, str) and x)
+        schema['platform_ids']['options'] = sorted(options)
+
+    async def watch_platform_options(self):
+        while True:
+            try:
+                self.refresh_platform_options()
+            except Exception as exc:
+                self.logger.warning('Platform selector refresh failed (%s)', type(exc).__name__)
+            await asyncio.sleep(10)
+
     async def initialize(self):
+        self._option_task = asyncio.create_task(self.watch_platform_options())
         if not self.config.get("enabled", True):
             return
         try:
@@ -277,6 +301,10 @@ class FeishuAgentCard(Star):
 
     async def terminate(self):
         self.enabled = False
+        option_task = getattr(self, "_option_task", None)
+        if option_task:
+            option_task.cancel()
+            await asyncio.gather(option_task, return_exceptions=True)
         self.interactions.close()
         self.observer.uninstall()
         await asyncio.gather(*(session.finish("插件已停用，后续回复使用原生方式") for session in list(self.sessions)), return_exceptions=True)
