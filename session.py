@@ -245,7 +245,7 @@ class Session:
                 self.state.text = "模型本轮未返回可展示的回答正文。"
                 failures = [tool for tool in self.state.tools if tool.get("status", "").startswith("失败")]
                 if failures:
-                    self.state.text += "\n\n工具调用未成功：" + "；".join(tool["name"] + " · " + tool["status"] for tool in failures[-3:]) + "。请检查接口参数或账户权限后重试。"
+                    self.state.text += "\n\n工具调用未成功：" + "；".join(tool["name"] + " · " + tool["status"] for tool in failures[-3:]) + "。请检查工具状态后重试。"
                 else:
                     self.state.text += "请重试，或在 AstrBot 中检查模型配置。"
         self.state.step(self.state.terminal)

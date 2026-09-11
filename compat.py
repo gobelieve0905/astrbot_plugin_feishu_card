@@ -125,24 +125,6 @@ def tool_display_name(tool):
     return label(custom if isinstance(custom, str) and custom.strip() else tool.name, 200)
 
 
-def tool_failure(tool, result):
-    """Read only the declared API result envelope, never display its raw error body."""
-    import json
-    failed = bool(getattr(result, "isError", False))
-    status = None
-    if getattr(tool, "result_status_format", None) == "api_import_v1":
-        content = getattr(result, "content", [])
-        for block in content if isinstance(content, list) else []:
-            text = getattr(block, "text", None)
-            if not isinstance(text, str) or len(text) > 100000:
-                continue
-            try:
-                value = json.loads(text)
-            except (ValueError, RecursionError):
-                continue
-            if isinstance(value, dict) and value.get("ok") is False:
-                failed = True
-                code = value.get("status")
-                if type(code) is int and 100 <= code <= 599:
-                    status = code
-    return failed, status
+def tool_failure(result):
+    """Honor the host's standard result status without interpreting tool-specific content."""
+    return bool(getattr(result, "isError", False))

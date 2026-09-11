@@ -183,11 +183,11 @@ class FeishuAgentCard(Star):
         session = event.get_extra(KEY)
         if not session or session.closed:
             return
-        error, http_status = tool_failure(tool, tool_result)
+        error = tool_failure(tool_result)
         name = tool_display_name(tool)
         for record in reversed(session.state.tools):
             if record.get("tool_id", record["name"]) == tool.name and "end" not in record:
-                record.update(end=time.monotonic(), status=(f"失败（HTTP {http_status}）" if http_status else "失败") if error else "已返回")
+                record.update(end=time.monotonic(), status="失败" if error else "已返回")
                 break
         session.state.step(f"工具{name}已返回，等待模型继续处理" if not error else f"工具{name}失败，等待模型处理")
         # Only explicit structured source fields; arbitrary URLs inside result text aren't citations.
