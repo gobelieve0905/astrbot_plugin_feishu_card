@@ -30,6 +30,8 @@ class Observer:
         self.handler = None
         self.outer_original = None
         self.outer_wrapper = None
+        self.send_original = None
+        self.send_wrapper = None
 
     def install(self):
         from astrbot import __version__
@@ -103,10 +105,38 @@ class Observer:
 
         self.outer_original, self.outer_wrapper = outer_original, observed_outer
         ToolLoopAgentRunner._iter_llm_responses_with_fallback = observed_outer
+        from astrbot.core.tools.message_tools import SendMessageToUserTool
+        self.send_original = SendMessageToUserTool.call
+        original_send = self.send_original
+
+        async def send_in_card(tool, context, **kwargs):
+            event = getattr(getattr(context, "context", None), "event", None)
+            session = event.get_extra(KEY) if event else None
+            current = getattr(event, "unified_msg_origin", None)
+            target = kwargs.get("session")
+            messages = kwargs.get("messages")
+            same_session = current and (not target or target == current)
+            plain_only = (isinstance(messages, list) and bool(messages) and all(
+                isinstance(item, dict) and str(item.get("type", "")).lower() == "plain"
+                and isinstance(item.get("text"), str) and item["text"].strip()
+                for item in messages))
+            if session and not session.closed and same_session and plain_only:
+                if session.stop_requested:
+                    return "本轮已终止，未发送消息。"
+                await session.accept_direct_text("\n\n".join(item["text"].strip() for item in messages))
+                return "文本已合并至当前回复卡片，请勿重复发送；最终回答直接输出即可。"
+            return await original_send(tool, context, **kwargs)
+
+        self.send_wrapper = send_in_card
+        SendMessageToUserTool.call = send_in_card
         self.handler = RetryHandler()
         logging.getLogger("astrbot").addHandler(self.handler)
 
     def uninstall(self):
+        if self.send_original:
+            from astrbot.core.tools.message_tools import SendMessageToUserTool
+            if SendMessageToUserTool.call is self.send_wrapper:
+                SendMessageToUserTool.call = self.send_original
         if self.original:
             from astrbot.core.agent.runners.tool_loop_agent_runner import ToolLoopAgentRunner
             if ToolLoopAgentRunner._iter_llm_responses is self.wrapper:

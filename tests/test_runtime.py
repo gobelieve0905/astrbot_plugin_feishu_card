@@ -685,6 +685,60 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         plugin.refresh_platform_options()
         self.assertEqual(config.schema['platform_ids']['options'], ['new-instance', 'removed-instance'])
 
+    async def test_direct_text_uses_card_and_final_answer(self):
+        from unittest.mock import AsyncMock, patch
+        from astrbot.core.tools.message_tools import SendMessageToUserTool
+        original = AsyncMock(return_value="native")
+        with patch.object(SendMessageToUserTool, "call", original):
+            observer = compat.Observer()
+            try:
+                observer.install()
+                event, session = await self.new_session()
+                event.unified_msg_origin = "test:LARK:test-session"
+                event.set_extra(compat.KEY, session)
+                context = SimpleNamespace(context=SimpleNamespace(event=event))
+                tool = SendMessageToUserTool()
+                args = {"messages": [{"type": "plain", "text": "API failed"}]}
+                await tool.call(context, **args)
+                await tool.call(context, session=event.unified_msg_origin, **args)
+                self.assertEqual(session.direct_texts, ["API failed"])
+                self.assertEqual(session.state.text, "API failed")
+                session.final_text = "Final explanation"
+                await session.finish()
+                self.assertEqual(session.state.text, "Final explanation")
+                original.assert_not_awaited()
+                self.assertEqual(event.native, [])
+            finally:
+                observer.uninstall()
+            self.assertIs(SendMessageToUserTool.call, original)
+
+    async def test_direct_text_scope_and_tool_only_answer(self):
+        from unittest.mock import AsyncMock, patch
+        from astrbot.core.tools.message_tools import SendMessageToUserTool
+        original = AsyncMock(return_value="native")
+        with patch.object(SendMessageToUserTool, "call", original):
+            observer = compat.Observer()
+            try:
+                observer.install()
+                event, session = await self.new_session()
+                event.unified_msg_origin = "test:LARK:test-session"
+                event.set_extra(compat.KEY, session)
+                context = SimpleNamespace(context=SimpleNamespace(event=event))
+                tool = SendMessageToUserTool()
+                text = [{"type": "plain", "text": "Useful answer"}]
+                await tool.call(context, messages=text, session="other:LARK:other")
+                await tool.call(context, messages=[*text, {"type": "image", "url": "test"}])
+                inactive = SimpleNamespace(context=SimpleNamespace(event=FakeEvent()))
+                await tool.call(inactive, messages=text)
+                self.assertEqual(original.await_count, 3)
+                await tool.call(context, messages=text)
+                session.state.text = ""  # Host starts another model response without a final body.
+                await session.finish()
+                self.assertEqual(session.state.text, "Useful answer")
+                self.assertEqual(event.native, [])
+            finally:
+                observer.uninstall()
+
     async def test_observer_restore(self):
         from astrbot.core.agent.runners.tool_loop_agent_runner import ToolLoopAgentRunner
         original = ToolLoopAgentRunner._iter_llm_responses

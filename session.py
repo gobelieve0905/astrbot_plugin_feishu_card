@@ -23,6 +23,7 @@ class Session:
         self.stream_active = False
         self.done_received = False
         self.final_text = None
+        self.direct_texts = []
         self.failed = False
         self.delivery_failed = False
         self.task = None
@@ -128,6 +129,18 @@ class Session:
             async with self.lock:
                 self.state.rich_card, self.state.text = previous
             raise
+
+    async def accept_direct_text(self, text):
+        """Own same-session plain tool output without creating another chat message."""
+        if text not in self.direct_texts:
+            self.direct_texts.append(text)
+        if not self.state.rich_card:
+            self.state.text = "\n\n".join(self.direct_texts)
+        self.event._has_send_oper = True
+        try:
+            await self.flush()
+        except Exception as exc:
+            self.plugin.logger.warning("Card text update deferred (%s)", type(exc).__name__)
 
     def archive_progress(self):
         """A host tool boundary identifies public interim text, without keyword parsing."""
@@ -237,6 +250,8 @@ class Session:
                     tool.update(end=self.state.ended, status="已停止等待")
         if self.stop_requested and not self.state.text.strip():
             self.state.text = "已终止，本次未生成回答内容。"
+        if not self.state.text.strip() and not self.state.rich_card and self.direct_texts and not self.stop_requested:
+            self.state.text = "\n\n".join(self.direct_texts)
         if not self.state.text.strip() and not self.state.rich_card:
             if self.failed or not self.done_received:
                 self.state.text = "本轮未能生成回答，请稍后重试。"
