@@ -1,14 +1,4 @@
-# 飞书卡片插件开发规范
-
-本目录仅维护 AstrBot 飞书卡片插件，机器人对话与模型配置由 AstrBot 管理。
-
-- 修改前阅读 README.md、检查 Git 状态与 diff，保留未提交改动。
-- 不改 AstrBot 上游核心，不把消息理解改成关键词路由或硬编码回答。
-- 本机只开发和检查，禁止连接生产飞书应用或启动第二条长连接。
-- Python 检查使用 -B；卡片渲染测试可在本机运行，依赖 AstrBot 的运行测试在无网络容器中完成。
-- 不把密钥、Token、聊天记录、业务结果或生产配置提交到仓库。
-- 部署通过独立服务器运维工作区的 deploy-plugin.sh，不将主机运维放进插件仓库；生产插件位于 /srv/apps/astrbot/state/data/plugins/astrbot_plugin_feishu_agent_card。
-- 插件改动更新 CHANGELOG.md；检查通过后按下述流程自动提交、推送 develop 并部署服务器测试，不自动发布市场版本或发送测试消息。
+# 开发与正式发布
 
 ## AstrBot 插件分支与发布规范
 
@@ -21,5 +11,9 @@
 - 不配置 GitHub Actions 自动发布工作流。正式发布前人工核对提交属于 `main`、版本一致，且存在同版本、同提交的测试标签及验收记录。
 - 正式标签仅记录用户已验收版本，不作为自动发布或送审触发器。自动提交、推送与服务器测试部署不包含合并 main、打标签或市场送审；推送使用明确的 develop 分支 refspec 并关闭 push.followTags，不使用 --tags、--follow-tags 或 --mirror。
 - GitHub Release/安装包发布与 AstrBot Cloud 市场审核分开记录。未验证 Cloud 自动送审接口前，不伪造 API、不宣称 GitHub Release 等于市场上架；Cloud 手动入口为「＋发布 → 选择现有仓库 → 解析 → 更新插件版本」。GitHub App 的外部自动同步机制尚未确认，删除 Actions 不代表关闭该 App 的外部同步。
+
+日常修改由 Agent 自动提交并推送 develop，再部署服务器测试。用户决定合并 main 后，测试标签和验收后的正式标签均由用户本人手动创建、推送。准备对外更新时，前往 https://cloud.astrbot.app/publish 选择仓库、解析并核对版本，最后手动点击「更新插件版本」送审。GitHub Release 如有需要可另行手动创建。
+
+送审后在插件详情的「版本」页查看审核结果。回滚使用先前固定标签；不强制移动既有标签。
 
 - 插件市场安装包自动排除开发文档：在 `.gitattributes` 使用 `export-ignore` 排除协作规范、开发/架构/验收/发布说明、插件间开发协议和测试资料；新增开发文档时同步补充规则。保留 README、CHANGELOG、LICENSE、用户升级/排障说明及运行时文件。README 引用被排除的文档时使用 GitHub 链接。发布前检查实际 ZIP 文件清单；此规则适用于 Git archive/GitHub 源码归档，不会隐藏 GitHub 仓库文件，也不会过滤 git clone 或任意压缩工具的结果。

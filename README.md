@@ -41,6 +41,10 @@ AstrBot 飞书回复展示插件。收到 Agent 请求后立即创建卡片，�
 
 ## 配置
 
+“生效的飞书实例”使用多选下拉框，只需勾选，无需手填 ID；留空表示全部飞书实例。选项包括已配置但暂时停用的飞书实例，已有选择不会因实例删除而自动清空。新增/删除实例后，等待约 10 秒并重新打开配置窗口。
+
+“图片上传允许目录”限制插件从服务器哪些文件夹读取并上传图片，不是飞书保存图片的位置。一般留空即可，默认允许 AstrBot 的 `data/temp` 和 `data/plugin_data`。只有生成图片放在其他目录时才需自定义；Docker 应填容器内绝对路径，自定义列表会替换默认目录。
+
 插件后台支持总开关、实例 ID 列表、私聊/群聊开关、过程/工具/来源/用量可见性、过程默认折叠、更新间隔和模型价格。
 
 价格 JSON 以卡片实际展示的 `供应商标识/模型` 为键。每个模型提供每百万 Token 的 `input`、`cached_input`、`output` 三项单价。币种由 `price_currency` 指定；不做汇率换算。价格缺失或格式无效时隐藏费用。
@@ -122,7 +126,7 @@ MCP 工具结果的 `structuredContent.sources` 支持同样结构。本插件�
 
 ### 续聊事件约定（0.2.8）
 
-这是插件之间新增的约定，**不是 AstrBot 内置标准**。插件在提交事件前设置 `conversation_continuation_v1`，精确包含 `version`、`source`、`event_id`、`origin_message_id` 四个字段；详见 [续聊事件约定](CONTINUATION_V1.md)。新交互不复用原提问消息编号，同一回调重复投递使用相同编号。
+这是插件之间新增的约定，**不是 AstrBot 内置标准**。插件在提交事件前设置 `conversation_continuation_v1`，精确包含 `version`、`source`、`event_id`、`origin_message_id` 四个字段；详见 [续聊事件约定](https://github.com/gobelieve0905/astrbot_plugin_feishu_card/blob/main/CONTINUATION_V1.md)。新交互不复用原提问消息编号，同一回调重复投递使用相同编号。
 
 插件不查话题数据库、不切换对话、不导入或检测任何话题插件。单独安装时使用 AstrBot 原生连续会话；如需点击旧卡片恢复对应项目，由其他消费者根据本约定和可信事件身份自行实现。仅提示“已接收操作，已提交 AstrBot 处理”，不表示某个话题已恢复。当前卡片插件代码完成协议生产端；未替其他插件实现消费端，也未验证其恢复行为。
 

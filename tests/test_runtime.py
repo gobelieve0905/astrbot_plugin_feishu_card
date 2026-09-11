@@ -636,6 +636,25 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         finally:
             manager.close()
 
+    async def test_platform_selector_filters_and_preserves_selected_scope(self):
+        main = importlib.import_module(package + '.main')
+        class Config(dict):
+            schema = {'platform_ids': {'type': 'list', 'options': []}}
+        config = Config(platform_ids=['removed-instance'])
+        inventory = {'platform': [{'type': 'lark', 'id': 'feishu-b', 'enable': False},
+            {'type': 'lark', 'id': 'feishu-a', 'app_secret': 'never-expose'},
+            {'type': 'qq', 'id': 'not-feishu'}, {'type': 'lark', 'id': None}]}
+        plugin = object.__new__(main.FeishuAgentCard)
+        plugin._dashboard_config = config
+        plugin.context = SimpleNamespace(get_config=lambda: inventory)
+        plugin.refresh_platform_options()
+        self.assertEqual(config.schema['platform_ids']['options'], ['feishu-a', 'feishu-b', 'removed-instance'])
+        self.assertEqual(config['platform_ids'], ['removed-instance'])
+        self.assertNotIn('never-expose', str(config.schema))
+        inventory['platform'] = [{'type': 'lark', 'id': 'new-instance'}]
+        plugin.refresh_platform_options()
+        self.assertEqual(config.schema['platform_ids']['options'], ['new-instance', 'removed-instance'])
+
     async def test_observer_restore(self):
         from astrbot.core.agent.runners.tool_loop_agent_runner import ToolLoopAgentRunner
         original = ToolLoopAgentRunner._iter_llm_responses
