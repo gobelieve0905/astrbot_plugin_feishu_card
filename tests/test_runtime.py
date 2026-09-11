@@ -53,8 +53,8 @@ class FakeEvent:
     def is_stopped(self):
         return False
 
-    def get_extra(self, key):
-        return self.extras.get(key)
+    def get_extra(self, key, default=None):
+        return self.extras.get(key, default)
 
     def set_extra(self, key, value):
         self.extras[key] = value
@@ -325,6 +325,35 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         finally:
             manager.close()
         self.assertNotIn('p2.card.action.trigger', platform.event_handler._callback_processor_map)
+
+    async def test_api_custom_name_failure_and_empty_model_answer(self):
+        from mcp.types import CallToolResult, TextContent
+        main = importlib.import_module(package + '.main')
+        plugin = object.__new__(main.FeishuAgentCard)
+        event, session = await self.new_session()
+        event.set_extra(compat.KEY, session)
+        tool = SimpleNamespace(name='api_internal', display_name='海外账户 / 花费日报', result_status_format='api_import_v1')
+        await plugin.tool_start(event, tool, {})
+        result = CallToolResult(content=[TextContent(type='text', text='{"ok":false,"status":400,"error":"private upstream details"}')])
+        await plugin.tool_end(event, tool, {}, result)
+        self.assertEqual(session.state.tools[0]['name'], '海外账户 / 花费日报')
+        self.assertEqual(session.state.tools[0]['status'], '失败（HTTP 400）')
+        self.assertFalse(session.state.sources)
+        await plugin.done(event, None, SimpleNamespace(completion_text='', reasoning_content='private reasoning', role='assistant'))
+        await session.finish()
+        self.assertEqual(session.state.terminal, '未生成正文')
+        self.assertIn('海外账户 / 花费日报', session.state.text)
+        self.assertIn('HTTP 400', session.state.text)
+        self.assertNotIn('private', str(session.transport.bodies))
+
+    async def test_tool_labels_do_not_change_routing_or_unknown_result_semantics(self):
+        from mcp.types import CallToolResult, TextContent
+        tool = SimpleNamespace(name='stable_id', display_name='账户名 / 操作名')
+        result = CallToolResult(content=[TextContent(type='text', text='{"ok":false,"status":400}')])
+        self.assertEqual(compat.tool_display_name(tool), '账户名 / 操作名')
+        self.assertEqual(tool.name, 'stable_id')
+        self.assertEqual(compat.tool_failure(tool, result), (False, None))
+        self.assertEqual(compat.tool_display_name(SimpleNamespace(name='legacy_tool')), 'legacy_tool')
 
     async def test_native_tools_registered_and_schema_errors_are_returned(self):
         main = importlib.import_module(package + '.main')

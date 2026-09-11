@@ -10,7 +10,7 @@ from astrbot.api.event import filter
 from astrbot.api.star import Context, Star, StarTools
 
 from .card import State, label, render
-from .compat import KEY, Observer
+from .compat import KEY, Observer, tool_display_name, tool_failure
 from .session import Session
 from .transport import Transport
 from .rich import guide, parse_card
@@ -174,8 +174,8 @@ class FeishuAgentCard(Star):
         if not session or session.closed:
             return
         session.archive_progress()
-        name = label(tool.name, 80)
-        session.state.tools.append({"name": name, "start": time.monotonic(), "status": "执行中"})
+        name = tool_display_name(tool)
+        session.state.tools.append({"name": name, "tool_id": tool.name, "start": time.monotonic(), "status": "执行中"})
         session.state.step(f"正在调用工具：{name}")
 
     @filter.on_llm_tool_respond()
@@ -183,11 +183,11 @@ class FeishuAgentCard(Star):
         session = event.get_extra(KEY)
         if not session or session.closed:
             return
-        error = getattr(tool_result, "isError", False)
-        name = label(tool.name, 80)
+        error, http_status = tool_failure(tool, tool_result)
+        name = tool_display_name(tool)
         for record in reversed(session.state.tools):
-            if record["name"] == name and "end" not in record:
-                record.update(end=time.monotonic(), status="失败" if error else "已返回")
+            if record.get("tool_id", record["name"]) == tool.name and "end" not in record:
+                record.update(end=time.monotonic(), status=(f"失败（HTTP {http_status}）" if http_status else "失败") if error else "已返回")
                 break
         session.state.step(f"工具{name}已返回，等待模型继续处理" if not error else f"工具{name}失败，等待模型处理")
         # Only explicit structured source fields; arbitrary URLs inside result text aren't citations.
@@ -219,7 +219,7 @@ class FeishuAgentCard(Star):
             session.state.terminal = "本轮未完成"
             session.state.step("模型未能完成回答，请稍后重试")
         else:
-            session.state.step("回答已生成，正在完成交付")
+            session.state.step("模型请求已结束，正在完成交付")
         self.read_registered_sources(event, session)
         # Host stores raw reasoning for result decoration; this plugin never displays it.
         event.set_extra("_llm_reasoning_content", "")

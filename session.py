@@ -237,8 +237,17 @@ class Session:
                     tool.update(end=self.state.ended, status="已停止等待")
         if self.stop_requested and not self.state.text.strip():
             self.state.text = "已终止，本次未生成回答内容。"
-        if not self.state.text.strip():
-            self.state.text = "本轮未能生成回答，请稍后重试。" if self.failed or not self.done_received else "本轮没有生成可展示的正文。"
+        if not self.state.text.strip() and not self.state.rich_card:
+            if self.failed or not self.done_received:
+                self.state.text = "本轮未能生成回答，请稍后重试。"
+            else:
+                self.state.terminal = status or "未生成正文"
+                self.state.text = "模型本轮未返回可展示的回答正文。"
+                failures = [tool for tool in self.state.tools if tool.get("status", "").startswith("失败")]
+                if failures:
+                    self.state.text += "\n\n工具调用未成功：" + "；".join(tool["name"] + " · " + tool["status"] for tool in failures[-3:]) + "。请检查接口参数或账户权限后重试。"
+                else:
+                    self.state.text += "请重试，或在 AstrBot 中检查模型配置。"
         self.state.step(self.state.terminal)
         if self.plugin.config.get("enable_reply_download", True) and hasattr(self.plugin, 'interactions'):
             try:

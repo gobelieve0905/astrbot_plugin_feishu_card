@@ -113,14 +113,14 @@ class State:
     calls: int = 0
 
     def step(self, text):
-        text = label(text, 180)
+        text = label(text, 260)
         if not self.steps or self.steps[-1][1] != text:
             self.steps.append((int(time.monotonic() - self.start), text))
             self.steps = self.steps[-12:]
         self.status = text
 
     def source(self, title, url="", kind="资料"):
-        item = (label(title, 120), source_url(url), label(kind, 30))
+        item = (label(title, 200), source_url(url), label(kind, 30))
         if item[0] and item not in self.sources and len(self.sources) < 20:
             self.sources.append(item)
 
@@ -177,7 +177,7 @@ def render(state, config, part="", page=0, count=1, historical=False):
         lines = []
         for tool in state.tools[-16:]:
             duration = int((tool.get("end") or time.monotonic()) - tool["start"])
-            lines.append(f"**{label(tool['name'], 80)}** · {tool['status']} · {duration}s")
+            lines.append(f"**{label(tool['name'], 200)}** · {tool['status']} · {duration}s")
         elements.append(panel(f"工具调用（{len(state.tools)}）", "\n\n".join(lines)))
     if config.get("show_sources", True) and state.sources:
         lines = [f"- [{title}]({url}) · {kind}" if url else f"- {title} · {kind}" for title, url, kind in state.sources]
