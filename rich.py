@@ -40,7 +40,8 @@ def guide(component='all'):
                        'button / input / select_static / multi_select_static / select_person / multi_select_person',
                        'select_img / overflow / date_picker / picker_time / picker_datetime / checker'],
         'docs': DOCS + 'card-json-v2-structure',
-        'rules': ['Use code fences with language for code; never execute code merely to display it.',
+        'rules': ['Serialize the complete card object exactly once for card_json; escape quotes and backslashes in string values. Do not manually concatenate JSON or shorten data to fix encoding errors.',
+                  'Use code fences with language for code; never execute code merely to display it.',
                   'Choose table for exact comparisons, chart for trends, columns for side-by-side summaries.',
                   'Keep identifiers and names complete: never abbreviate or replace suffixes with ellipses. Tables use automatic row height; the plugin sets pixel column widths for native horizontal scrolling. Never duplicate tables as row-by-row detail panels.',
                   'Use feishu_card_upload_image for local generated image assets, then pass the returned img_key; never invent resource keys or business data.',
@@ -55,16 +56,41 @@ def guide(component='all'):
     return json.dumps(result, ensure_ascii=False)
 
 
-def parse_card(card_json):
+def decode_card(card_json):
+    """Decode bounded transport wrappers without rewriting card data or guessing syntax."""
     if not isinstance(card_json, str) or len(card_json.encode()) > 24000:
         raise ValueError('card_json must be a JSON string within 24 KB; split large content into separate concise views.')
-    card = json.loads(card_json)
+    text = card_json.strip()
+    for _ in range(3):
+        fence = re.fullmatch(r"```(?:json)?\s*\n(.*?)\n```", text, flags=re.DOTALL | re.IGNORECASE)
+        if fence:
+            text = fence.group(1)
+        try:
+            # strict=False only accepts literal control characters inside strings.
+            # json.dumps at transport time escapes them again without altering content.
+            decoded = json.loads(text, strict=False)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f'卡片 JSON 格式错误：第 {exc.lineno} 行、第 {exc.colno} 列（{exc.msg}）。'
+                             '请用 JSON 序列化生成 card_json；字符串中的双引号和反斜杠必须转义。'
+                             '不要删减表格或改动原数据；也可直接输出完整 fallback_text。') from None
+        if not isinstance(decoded, str):
+            return decoded
+        text = decoded.strip()
+        if len(text.encode()) > 24000:
+            break
+    raise ValueError('card_json 重复编码层数过多；请仅序列化一次完整 JSON 2.0 对象。')
+
+
+def parse_card(card_json):
+    card = decode_card(card_json)
     if not isinstance(card, dict) or card.get('schema') != '2.0':
         raise ValueError('Use native schema 2.0 with body.elements. Legacy JSON 1.0/templates are not CardKit documents; convert or resolve the template first.')
     if not isinstance(card.get('body'), dict) or not isinstance(card['body'].get('elements'), list):
         raise ValueError('body.elements must be an array.')
     # Do not whitelist tags: new official components remain usable without plugin releases.
     result = copy.deepcopy(card)
+    if 'config' in result and not isinstance(result['config'], dict):
+        raise ValueError('config must be an object.')
     result.setdefault('config', {}).pop('streaming_mode', None)
     result['config']['update_multi'] = True
     result['config']['wide_screen_mode'] = True

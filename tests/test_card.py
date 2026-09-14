@@ -17,6 +17,24 @@ rich_spec.loader.exec_module(rich)
 
 
 class CardTests(unittest.TestCase):
+    def test_card_json_wrappers_and_literal_newlines_preserve_content(self):
+        source = {'schema':'2.0', 'body':{'elements':[{'tag':'markdown','content':'代码\n"quoted" \\path 中文'}]}}
+        encoded = json.dumps(source, ensure_ascii=False)
+        variants = [encoded, json.dumps(encoded), '```json\n' + encoded + '\n```', encoded.replace('\\n', '\n')]
+        for text in variants:
+            self.assertEqual(rich.parse_card(text)['body'], source['body'])
+
+    def test_card_json_malformed_not_guessed_or_leaked(self):
+        for text in ('{"secret":"private-value", BAD}', '{"schema":"2.0","body":', 'prefix {}'):
+            with self.assertRaises(ValueError) as caught:
+                rich.parse_card(text)
+            self.assertIn('第', str(caught.exception))
+            self.assertNotIn('private-value', str(caught.exception))
+        with self.assertRaises(ValueError):
+            rich.parse_card(json.dumps({'schema':'2.0','body':{'elements':[]},'config':None}))
+        with self.assertRaises(ValueError):
+            rich.parse_card(' ' * 24001)
+
     def test_visual_hierarchy(self):
         state = card.State(question='question', text='answer')
         state.step('preparing')

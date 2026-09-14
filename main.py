@@ -278,7 +278,7 @@ class FeishuAgentCard(Star):
         """根据场景构建或替换当前飞书回复卡片，支持原生 JSON 2.0 组件与嵌套布局。先用 guide 查询用法；按钮表单 callback 的 value.action 描述继续处理任务。成功后不要重复输出正文。
 
         Args:
-            card_json(string): 完整飞书 JSON 2.0 文档字符串，含 schema 和 body.elements；真实资源键，不编造数据。
+            card_json(string): 完整飞书 JSON 2.0 文档字符串，含 schema 和 body.elements；用 JSON 序列化生成，字符串内双引号与反斜杠须转义；不要手工拼接或为修复编码删减数据。
             fallback_text(string): 卡片无法交付时可直接发送给用户的完整文字结果，含代码和关键数据。
         """
         session = await self.ensure(event)
