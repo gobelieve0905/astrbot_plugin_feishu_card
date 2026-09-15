@@ -36,8 +36,8 @@ class Observer:
     def install(self):
         from astrbot import __version__
         from astrbot.core.agent.runners.tool_loop_agent_runner import ToolLoopAgentRunner
-        if str(__version__).lstrip("v") != "4.28.0":
-            raise RuntimeError("当前仅验收 AstrBot 4.28.0；保留原生回复")
+        if str(__version__).lstrip("v") not in {"4.28.0", "4.28.1"}:
+            raise RuntimeError("当前仅验收 AstrBot 4.28.0 / 4.28.1；保留原生回复")
         original = ToolLoopAgentRunner._iter_llm_responses
         if getattr(original, "_feishu_card_observer", False):
             raise RuntimeError("已有飞书卡片观察器")
