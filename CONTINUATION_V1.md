@@ -41,7 +41,7 @@ event.set_extra("conversation_continuation_v1", {
 
 ## 标准管道与独立运行
 
-核实版本：AstrBot 4.28.0，lark-oapi 1.7.3。使用 `LarkPlatformAdapter.create_event(AstrBotMessage)` 创建 `LarkMessageEvent`，使用 `commit_event()` 的原生事件队列提交。新消息的外层 message_id 和 raw_message.message_id 都是新编号；不会留下旧提问正文、旧引用 parent_id 或旧发送者。
+当前核实基线：AstrBot 4.29.4，lark-oapi 1.7.3；元数据允许 >=4.28.0,<5.0.0，运行时按所需接口检查兼容性。使用 `LarkPlatformAdapter.create_event(AstrBotMessage)` 创建 `LarkMessageEvent`，使用 `commit_event()` 的原生事件队列提交。新消息的外层 message_id 和 raw_message.message_id 都是新编号；不会留下旧提问正文、旧引用 parent_id 或旧发送者。
 
 群聊原生 session_id 为群 ID，私聊为实际用户 ID。事件包含真实机器人 At 组件，交给原生唤醒和权限阶段；不继承原事件的管理员权限、唤醒标记、被改写后的 session 或其他 extras。元数据仅表达“这是哪条提问的后续操作”。插件不访问话题数据库、不选择/切换 conversation、不导入或检测其他话题插件。
 

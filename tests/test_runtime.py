@@ -739,6 +739,42 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
             finally:
                 observer.uninstall()
 
+    async def test_newer_host_versions_allow_compatible_observer(self):
+        from unittest.mock import patch
+        for version in ("4.29.5", "4.30.0"):
+            with self.subTest(version=version), patch("astrbot.__version__", version):
+                observer = compat.Observer()
+                try:
+                    observer.install()
+                    self.assertIsNotNone(observer.handler)
+                finally:
+                    observer.uninstall()
+
+    async def test_incompatible_host_api_keeps_original_methods(self):
+        from unittest.mock import patch
+
+        from astrbot.core.agent.runners.tool_loop_agent_runner import (
+            ToolLoopAgentRunner,
+        )
+        from astrbot.core.tools.message_tools import SendMessageToUserTool
+        original = ToolLoopAgentRunner._iter_llm_responses
+        outer = ToolLoopAgentRunner._iter_llm_responses_with_fallback
+        send = SendMessageToUserTool.call
+        observer = compat.Observer()
+        for replacement in (None, lambda runner, required: None):
+            with self.subTest(replacement=replacement):
+                with (
+                    patch.object(ToolLoopAgentRunner, "_iter_llm_responses_with_fallback", replacement),
+                    self.assertRaisesRegex(RuntimeError, "接口不兼容"),
+                ):
+                    observer.install()
+                self.assertIs(original, ToolLoopAgentRunner._iter_llm_responses)
+                self.assertIsNone(observer.original)
+        self.assertIs(original, ToolLoopAgentRunner._iter_llm_responses)
+        self.assertIs(outer, ToolLoopAgentRunner._iter_llm_responses_with_fallback)
+        self.assertIs(send, SendMessageToUserTool.call)
+        self.assertIsNone(observer.handler)
+
     async def test_observer_restore(self):
         from astrbot.core.agent.runners.tool_loop_agent_runner import ToolLoopAgentRunner
         original = ToolLoopAgentRunner._iter_llm_responses

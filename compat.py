@@ -1,4 +1,4 @@
-"""Version-gated, reversible runtime observation. No installed source is changed."""
+"""Capability-checked, reversible runtime observation. No installed source is changed."""
 import contextvars
 import inspect
 import logging
@@ -34,15 +34,35 @@ class Observer:
         self.send_wrapper = None
 
     def install(self):
-        from astrbot import __version__
-        from astrbot.core.agent.runners.tool_loop_agent_runner import ToolLoopAgentRunner
-        if str(__version__).lstrip("v") not in {"4.28.0", "4.28.1"}:
-            raise RuntimeError("当前仅验收 AstrBot 4.28.0 / 4.28.1；保留原生回复")
-        original = ToolLoopAgentRunner._iter_llm_responses
+        from astrbot.core.agent.runners.tool_loop_agent_runner import (
+            ToolLoopAgentRunner,
+        )
+        from astrbot.core.tools.message_tools import SendMessageToUserTool
+
+        # Validate every wrapped interface before replacing any host method.
+        # Future 4.x releases are allowed when these call contracts still hold.
+        original = getattr(ToolLoopAgentRunner, "_iter_llm_responses", None)
+        outer_original = getattr(ToolLoopAgentRunner, "_iter_llm_responses_with_fallback", None)
+        original_send = getattr(SendMessageToUserTool, "call", None)
+        checks = (
+            ("_iter_llm_responses", original, (None,), {"include_model": True}, True),
+            ("_iter_llm_responses_with_fallback", outer_original, (None,), {}, True),
+            ("_is_stop_requested", getattr(ToolLoopAgentRunner, "_is_stop_requested", None),
+             (None,), {}, False),
+            ("SendMessageToUserTool.call", original_send, (None, None),
+             {"messages": []}, False),
+        )
+        for name, method, args, kwargs, streaming in checks:
+            try:
+                if not callable(method) or (streaming and not inspect.isasyncgenfunction(method)):
+                    raise TypeError
+                inspect.signature(method).bind(*args, **kwargs)
+            except (TypeError, ValueError):
+                raise RuntimeError(f"AstrBot 接口不兼容（{name}）；保留原生回复") from None
+        if not inspect.iscoroutinefunction(original_send):
+            raise RuntimeError("AstrBot 消息工具接口不兼容；保留原生回复")
         if getattr(original, "_feishu_card_observer", False):
             raise RuntimeError("已有飞书卡片观察器")
-        if "include_model" not in inspect.signature(original).parameters:
-            raise RuntimeError("模型流接口不兼容")
 
         async def observed(runner, *, include_model=True):
             event = getattr(getattr(runner.run_context, "context", None), "event", None)
@@ -82,7 +102,6 @@ class Observer:
         observed._feishu_card_observer = True
         self.original, self.wrapper = original, observed
         ToolLoopAgentRunner._iter_llm_responses = observed
-        outer_original = ToolLoopAgentRunner._iter_llm_responses_with_fallback
 
         async def observed_outer(runner):
             stream = outer_original(runner)
@@ -105,9 +124,7 @@ class Observer:
 
         self.outer_original, self.outer_wrapper = outer_original, observed_outer
         ToolLoopAgentRunner._iter_llm_responses_with_fallback = observed_outer
-        from astrbot.core.tools.message_tools import SendMessageToUserTool
-        self.send_original = SendMessageToUserTool.call
-        original_send = self.send_original
+        self.send_original = original_send
 
         async def send_in_card(tool, context, **kwargs):
             event = getattr(getattr(context, "context", None), "event", None)
