@@ -10,6 +10,8 @@
 - 部署通过独立服务器运维工作区的 deploy-plugin.sh，不将主机运维放进插件仓库；生产插件位于 /srv/apps/astrbot/state/data/plugins/astrbot_plugin_feishu_agent_card。
 - 插件改动更新 CHANGELOG.md；检查通过后按下述流程自动提交、推送 develop 并部署服务器测试，不自动发布市场版本或发送测试消息。
 
+- AstrBot 插件的开发测试直接在服务器 AstrBot 环境进行：服务器是唯一运行、验收和回归测试环境。本机工作区只用于编辑代码、整理提交、创建 Fork/推送 GitHub，不启动 AstrBot、不运行插件、不执行运行测试或发送测试消息。本地允许进行不执行插件的静态检查、格式检查和 Git 差异检查；服务器部署后以服务器日志、插件加载状态和实际验收结果为准。
+
 ## AstrBot 插件分支与发布规范
 
 - 所有 AstrBot 插件仓库必须保留 `main`（正式分支）和 `develop`（开发分支）；开发分支统一叫 `develop`，不另设 `dev`。
